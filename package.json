@@ -1,6 +1,6 @@
 {
   "name": "@doitian/dsh-provider-aliyun",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Aliyun DashScope (Bailian) model provider for DeepSeek Harness: registers an `aliyun` route carrying the Qwen model catalog, so the model list ships in the package instead of a profile.",
   "keywords": [
     "dsh",
