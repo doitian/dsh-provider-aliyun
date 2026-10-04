@@ -1,52 +1,46 @@
 # @doitian/dsh-provider-aliyun
 
-An **Aliyun DashScope (Bailian) provider preset** for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
+Aliyun **DashScope (Bailian)** as a model provider for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
 
-Installing this bundle registers one extra model provider route named `aliyun` on the
-`llm-pi-ai` adapter: Aliyun's OpenAI-compatible DashScope endpoint, carrying a starter
-Qwen model catalog. After installing, pick an Aliyun model in the composer like any
-other provider.
+The plugin registers one provider route, `aliyun`, and **owns it outright** — endpoint, credential reference, protocol, and the Qwen model catalog. The catalog is a file in this package, so the model list moves forward with `pnpm update` and never has to be written into a profile.
 
 ```yaml
 provider: aliyun
 model: qwen3.8-max
-baseURL: https://dashscope.aliyuncs.com/compatible-mode/v1
 ```
 
-## What this is, and what it is not
+## Why a plugin and not a config snippet
 
-It is **configuration only** — one patch layer, no runtime code. That is not a
-limitation of this package; it is how an OpenAI-compatible provider is added to DSH.
-`@deepseek-ai/dsh-llm-pi-ai` is the adapter, pi-ai supplies the wire protocol, and the
-`providers` dictionary is the entire extension surface. This bundle exists so that
-adding Aliyun is one install instead of a hand-written profile patch.
+An OpenAI-compatible provider *can* be added to DSH with configuration alone — declare a route under `llm-pi-ai`'s `providers` and hand-write its model list. That works, and then the model list lives in your profile forever: every new Qwen release is a hand edit, and a profile patch replaces an entry's whole `config`, so nothing can merge models into it later.
 
-It is **not** a new adapter. If you need a protocol pi-ai cannot speak, or a credential
-flow a key plus an endpoint cannot describe, this preset is the wrong tool — no config-only
-bundle can reach that.
+This package takes the other route. It registers its own route on the LLM seam and ships the catalog as data:
+
+| | Config-only route | This plugin |
+|---|---|---|
+| Where the model list lives | your `cordis.patch.yml` | `lib/catalog.js` in this package |
+| Adding a new Qwen model | edit your profile | `pnpm update` |
+| Can a profile patch shadow it | — | no |
+| Your profile config | the whole provider block | nothing |
+
+The trade-off is honest: the plugin depends on an internal shape of the adapter it reuses (see [How it works](#how-it-works)), which a config-only route does not.
 
 ## Requirements
 
-- DeepSeek Harness with the `@deepseek-ai/dsh-base` bundle (every standard profile), so that
-  `llm-pi-ai` is mounted. It is mounted dormant with zero routes until a profile supplies
-  providers, which is exactly what this bundle does.
+- DeepSeek Harness `0.2.0-rc.2` with the `@deepseek-ai/dsh-base` bundle, which mounts the LLM seam this plugin registers on.
 - An Aliyun DashScope / Bailian API key.
-- No new dependency on pi-ai: DashScope is OpenAI-compatible.
+- **No `aliyun` route configured through `llm-pi-ai`.** Two adapters cannot declare the same route: mounting this plugin while a profile still configures one fails with `configurable provider "aliyun" is already declared`. Remove that block from your profile patch first — that is the whole point of the plugin.
 
 ## Install
 
-**Desktop app.** Sidebar **Plugins** → install `@doitian/dsh-provider-aliyun`. The page
-enables a newly installed bundle by default.
+**Desktop app.** Sidebar **Plugins** → install `@doitian/dsh-provider-aliyun`. A newly installed bundle is enabled by default.
 
-**Any other profile.** The `plugin` subcommand forwards its arguments to pnpm in the profile
-directory:
+**Any other profile.** `dsh plugin` forwards its arguments to pnpm in the profile directory:
 
 ```bash
 dsh plugin --profile <name> add @doitian/dsh-provider-aliyun
 ```
 
-Then make sure the bundle is *selected* — a raw `add` installs the dependency but does not
-add it to `dsh.profile.bundles` in the profile's `package.json`:
+Then make sure the bundle is *selected* — a raw `add` installs the dependency but does not add it to `dsh.profile.bundles` in the profile's `package.json`:
 
 ```json
 {
@@ -58,89 +52,75 @@ add it to `dsh.profile.bundles` in the profile's `package.json`:
 }
 ```
 
-> The `dsh plugin` CLI refuses the `desktop` profile (`profile "desktop" is managed
-> exclusively by the Electron application`); use the Plugins page there.
+> The `dsh plugin` CLI refuses the `desktop` profile (`profile "desktop" is managed exclusively by the Electron application`); use the Plugins page there.
 
 ## Configure the API key
 
-The key is never stored in this package or in any profile patch. The preset points at a
-credential reference, and the harness resolves it per request:
+Nothing is needed to make the route exist, and no key is stored in this package or in any profile patch. The route resolves a credential reference per request:
 
 ```
-apiKeyEnv: ALIYUN_API_KEY
+apiKeyEnv: ALIYUN_API_KEY   # the default
 ```
 
-**Settings → Models → Aliyun DashScope** → paste the key into the **API key** field. The page
-writes it write-only to `$DSH_HOME/.credentials.yaml` under `ALIYUN_API_KEY`. Nothing secret
-enters a config file, and the field is not read back.
+**Settings → Models → Aliyun DashScope** → paste the key into the **API key** field. It is written write-only to `$DSH_HOME/.credentials.yaml` under `ALIYUN_API_KEY`, and never read back.
 
-Alternatively, export `ALIYUN_API_KEY` in the environment that launches DSH. The credential
-seam is consulted before the process environment. Until the key resolves, selecting an Aliyun
-model fails immediately with `MISSING_CREDENTIAL` — no network request is attempted.
+Or export `ALIYUN_API_KEY` in the environment that launches DSH. Until the key resolves, selecting an Aliyun model fails immediately with `MISSING_CREDENTIAL`, before any network I/O.
 
-### Change the endpoint
-
-The same card's **Customized settings** fold has a **base URL** field, so the endpoint is
-editable without touching YAML:
+### Endpoints
 
 | Region | Endpoint |
 |---|---|
 | Mainland China (default) | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
 | International | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` |
 
+Set it in the Models page, or by adding `baseURL` to this entry's `config`:
+
+```yaml
+- id: llm-aliyun
+  name: '@doitian/dsh-provider-aliyun'
+  config:
+    baseURL: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+```
+
 ## Models
 
-A route pi-ai does not ship must spell out its models, so this preset seeds six:
+`lib/catalog.js` is the catalog. It ships six Qwen models:
 
 `qwen3.8-max`, `qwen3.8-flash`, `qwen3.7-max`, `qwen3.7-plus`, `qwen3.6-plus`, `qwen3.6-flash`
 
-Capacities and thinking levels come from Aliyun's own published Qwen catalog. Treat the list
-as a **starter**, not as authority: DashScope serves models it does not name here and retires
-models it does name.
+Capacities and thinking levels mirror the facts Aliyun publishes for its Qwen lineup. A catalog entry states only what is true of the *model* — id, display name, context window, output cap, accepted modalities, and thinking levels. The route, endpoint, protocol, and compatibility switches are filled in from configuration by `lib/models.js`, so updating the catalog never means touching pi-ai plumbing.
 
-**Adopt the real list for your endpoint.** Open **Settings → Models → Aliyun DashScope** and
-use model discovery, which issues `GET {baseURL}/models` with your stored key and offers the
-result for adoption. Discovery never writes configuration on its own — you adopt the entries
-you want. You can also add, edit and remove model rows by hand, including context window,
-max output tokens, and text/image input types.
+**Verify capacities against your endpoint when you upgrade.** A wrong `contextWindow` is the failure that hurts, because the harness trusts it when it decides to compact history.
+
+### Updating the catalog
+
+Edit `lib/catalog.js` and publish. Consumers get the new list with `pnpm update`.
+
+### Overriding models for one profile
+
+`models` is a normal configuration field whose default is the shipped catalog, so a profile can replace it without forking:
+
+```yaml
+- id: llm-aliyun
+  name: '@doitian/dsh-provider-aliyun'
+  config:
+    models:
+      - id: qwen3.8-max
+        name: Qwen3.8 Max
+        contextWindow: 1000000
+        maxTokens: 131072
+        input: [text, image]
+        reasoning: true
+        thinkingLevelMap: { low: low, medium: medium, high: high }
+```
+
+The Models page edits the same field, showing the shipped catalog as inherited rows until the first edit materializes an override.
 
 ### Thinking
 
-`compat.thinkingFormat: qwen` is what makes the levels work: Aliyun turns thinking on with
-`enable_thinking` rather than a reasoning-effort field, so `supportsReasoningEffort: false`
-keeps an effort value off the wire while the selected level still drives the switch.
-`reasoningEfforts` on each model declares which levels the selector offers. Models you add
-yourself default to non-reasoning; declare `reasoningEfforts` to opt one in, or set `false`
-to say so explicitly.
+Aliyun turns thinking on with a boolean `enable_thinking` rather than a reasoning-effort field, which is what `compat.thinkingFormat: 'qwen'` sends, and `supportsReasoningEffort: false` keeps an effort value off the wire where this endpoint would refuse it. The selected level still drives the boolean, so `off` genuinely turns thinking off.
 
-## If you already configure `llm-pi-ai`
-
-**This is the one sharp edge, and it is worth reading.**
-
-A patch layer replaces an entry's `config` as a single value, and layers are applied
-bundles-first with your own `cordis.patch.yml` last. So if your profile already sets
-`llm-pi-ai.config` — for example to register a second provider — then **your layer wins
-wholesale and this bundle's `aliyun` route is never registered.** Not merged, not warned
-about: simply replaced.
-
-That is not specific to this package; the same is true of any bundle that targets an entry
-you also configure. The fix is to merge the route into your own entry by hand:
-
-```bash
-# copy providers.aliyun from the installed cordis.patch.yml, or:
-cat node_modules/@doitian/dsh-provider-aliyun/examples/merge-into-your-own-patch.yml
-```
-
-`examples/merge-into-your-own-patch.yml` is a ready-to-paste fragment that keeps your
-existing routes alongside `aliyun`.
-
-You can check what actually composed with:
-
-```bash
-dsh --profile <name> --dump-config
-```
-
-If `providers.aliyun` is absent from the `llm-pi-ai` entry there, your own layer replaced it.
+`thinkingLevelMap` on each catalog entry declares which levels a model offers and the wire spelling of each. A level left out is not offered; `off` is offered unless it is named in the map.
 
 ## Uninstall
 
@@ -150,54 +130,47 @@ Remove it from `dsh.profile.bundles` (or delete the row on the Plugins page), th
 dsh plugin --profile <name> remove @doitian/dsh-provider-aliyun
 ```
 
-Removing the bundle leaves the credential in `$DSH_HOME/.credentials.yaml` untouched.
-Deleting the Aliyun route from the Models page removes the credential only when its reference
-is exactly the page-derived `ALIYUN_API_KEY`; a custom reference is retained deliberately,
-because the page cannot prove it owns it.
+The credential in `$DSH_HOME/.credentials.yaml` is left untouched. Deleting the route on the Models page removes it only when its reference is exactly the page-derived `ALIYUN_API_KEY`; a custom reference is retained deliberately, because the page cannot prove it owns it.
 
 ## How it works
 
-`package.json` declares a DSH bundle patch:
+`package.json` declares a bundle patch:
 
 ```json
 { "dsh": { "bundle": { "patch": "./cordis.patch.yml" } } }
 ```
 
-and `cordis.patch.yml` overrides the `llm-pi-ai` entry mounted by `dsh-base`, asserting the
-module name so the patch fails loudly if that entry ever stops being the adapter:
+and the patch inserts this package's own plugin entry:
 
 ```yaml
-- id: llm-pi-ai
-  name: '@deepseek-ai/dsh-llm-pi-ai'
-  config:
-    providers:
-      aliyun: { ... }
+- insert:
+    - id: llm-aliyun
+      name: '@doitian/dsh-provider-aliyun'
 ```
 
-`lib/index.js` is `export {}` — the same shape as `dsh-base`. This bundle is a patch layer,
-and nothing ever imports its module.
+On mount, `lib/index.js` registers two things on the LLM seam: the `aliyun` route with an adapter, and a configurable-provider directory entry — the latter is what gives the route a row, and an API-key field, on the Models page.
+
+The adapter is `PiAiAdapter`, exported by `@deepseek-ai/dsh-llm-pi-ai`. It owns the hard part — harness history into pi-ai context, pi-ai events into harness stream chunks, image budgets, replay metadata, idle watchdogs — and reusing it is what keeps this package a catalog plus a few dozen lines instead of a second adapter implementation.
+
+**The one thing to know if you maintain this.** `PiAiAdapter` is driven by a route's *resolved profile*, a shape its package does not export as a type; `lib/adapter.js` reproduces it and documents every field it must carry. Model metadata is not read from that profile — it comes from the pi-ai model descriptors built out of the catalog, which is why the catalog can live here at all. A DSH upgrade that starts reading a new profile field breaks this plugin. `test/adapter.test.mjs` drives the real published adapter against the factory, so that break shows up as a failing test rather than as a broken route in someone's profile.
+
+The engine is pinned to the harness's own pi-ai: the dependency is `^0.87.1`, which resolves to exactly the `0.87.1` the harness installs, so both share one copy.
 
 ## Development
 
 ```bash
 npm install
-npm run validate
+npm run validate   # manifest, patch wiring, catalog integrity
+npm test           # drives the real PiAiAdapter against the catalog
 ```
 
-`scripts/validate.mjs` mirrors the constraints the harness itself enforces — the supported
-protocol table, the `openai-completions` compat gate, modalities, thinking levels, and the
-"a hand-declared route needs `api`, `baseURL` and a non-empty `models` list" rule — plus the
-manifest-to-patch wiring and the tarball contents. It is a fast fail in CI, not a substitute
-for the adapter's own validation, which still runs when your profile composes.
+`scripts/validate.mjs` catches what would otherwise fail silently: a tarball that drops the patch, a patch that names the wrong package, a duplicate model id, a non-integer capacity, a level map pi-ai would read as offering nothing.
 
-CI runs it on every push and pull request.
+`npm test` needs the peer packages installed — that is the point, since it exercises the real adapter rather than a stub. A live request is out of scope: that needs a real key and endpoint.
 
 ## Publishing
 
-Publishing uses **npm trusted publishing** (OIDC) from `.github/workflows/publish.yml`. There
-is no npm token anywhere: no `NODE_AUTH_TOKEN`, no `NPM_TOKEN`, no secret. The workflow
-declares `id-token: write` and runs `npm publish`, which exchanges that OIDC identity for a
-short-lived publish token.
+Publishing uses **npm trusted publishing** (OIDC) from `.github/workflows/publish.yml`. There is no npm token anywhere: no `NODE_AUTH_TOKEN`, no `NPM_TOKEN`, no secret. The workflow declares `id-token: write` and runs `npm publish`, which exchanges that OIDC identity for a short-lived publish token.
 
 One-time setup, in the package owner's npm account:
 
@@ -205,27 +178,22 @@ One-time setup, in the package owner's npm account:
    - Repository: `doitian/dsh-provider-aliyun`
    - Workflow filename: `publish.yml`
    - Environment: leave empty
-2. If npm requires the package to already exist before a trusted publisher can be attached,
-   publish `0.1.0` once by hand; the workflow owns every release after that.
+2. If npm requires the package to already exist before a trusted publisher can be attached, publish `0.1.0` once by hand; the workflow owns every release after that.
 
 Then release:
 
 ```bash
-npm version patch          # or minor / major
+npm version patch
 git push --follow-tags
 gh release create v0.1.1 --generate-notes
 ```
 
-The publish job requires the release tag to match `package.json` (`v0.1.1` ↔ `0.1.1`) and
-re-runs validation before uploading.
+The publish job requires the release tag to match `package.json` (`v0.1.1` ↔ `0.1.1`) and re-runs validation and tests before uploading.
 
 Two things that will bite when editing the workflow:
 
 - **`pnpm publish` does not work here.** It performs no OIDC exchange. Use `npm publish`.
-- **Pushing `.github/workflows/` needs the `workflow` token scope.** An OAuth token without
-  it is rejected for workflow files even though it can push everything else; add the scope
-  with `gh auth refresh -h github.com -s workflow`, or an SSH remote, which is not
-  scope-limited.
+- **Pushing `.github/workflows/` needs the `workflow` token scope.** An OAuth token without it is rejected for workflow files even though it can push everything else; add the scope with `gh auth refresh -h github.com -s workflow`, or use an SSH remote, which is not scope-limited.
 
 ## License
 

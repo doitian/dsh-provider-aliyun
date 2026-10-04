@@ -1,97 +1,12 @@
-# Aliyun DashScope (Bailian) provider preset for DeepSeek Harness.
+# Aliyun DashScope (Bailian) provider bundle for DeepSeek Harness.
 #
-# This patch layer overrides the `llm-pi-ai` entry that @deepseek-ai/dsh-base
-# mounts, so the adapter registers one extra provider route named `aliyun`:
-# Aliyun's OpenAI-compatible DashScope endpoint carrying the Qwen catalog.
+# This bundle inserts its own plugin entry. The endpoint, the credential
+# reference, and the Qwen model catalog are all defaults inside the package, so
+# nothing about the models belongs in a profile — the catalog moves forward with
+# `pnpm update`, and no profile patch can shadow it.
 #
-# READ THIS BEFORE RELYING ON THE PRESET
-# A patch layer replaces an entry's `config` as one whole value; layers are
-# applied bundles-first and your own `cordis.patch.yml` last. So if your profile
-# already sets `llm-pi-ai.config` (for example to register another provider),
-# *your* layer wins and this file has no effect. In that case copy
-# `providers.aliyun` from here into your own entry instead — see
-# examples/merge-into-your-own-patch.yml.
-#
-# The API key is never stored here. `apiKeyEnv` names a credential reference
-# that the harness resolves per request; store the key write-only in
-# Settings -> Models, which writes it to $DSH_HOME/.credentials.yaml, or export
-# ALIYUN_API_KEY in the launching environment.
-- id: llm-pi-ai
-  name: '@deepseek-ai/dsh-llm-pi-ai'
-  config:
-    providers:
-      aliyun:
-        displayName: Aliyun DashScope
-        api: openai-completions
-        # Mainland China. For the international endpoint use:
-        #   https://dashscope-intl.aliyuncs.com/compatible-mode/v1
-        baseURL: https://dashscope.aliyuncs.com/compatible-mode/v1
-        apiKeyEnv: ALIYUN_API_KEY
-        # Aliyun signals thinking with `enable_thinking` rather than a
-        # reasoning-effort field, which is what `thinkingFormat: qwen` does.
-        # The remaining switches widen the request shape for an endpoint pi-ai
-        # cannot recognise on its own.
-        compat:
-          thinkingFormat: qwen
-          supportsReasoningEffort: false
-          supportsDeveloperRole: false
-          supportsStore: false
-          supportsStrictMode: true
-        # Starter catalog. DashScope serves models this list does not name and
-        # retires ones it does; use "discover models" on the Models page (it
-        # reads GET {baseURL}/models with your stored key) to adopt the
-        # authoritative list for your endpoint.
-        models:
-          - id: qwen3.8-max
-            name: Qwen3.8 Max
-            contextWindow: 1000000
-            maxTokens: 131072
-            input: [text, image]
-            reasoningEfforts:
-              low: low
-              medium: medium
-              high: high
-          - id: qwen3.8-flash
-            name: Qwen3.8 Flash
-            contextWindow: 1000000
-            maxTokens: 131072
-            input: [text, image]
-            reasoningEfforts:
-              low: low
-              medium: medium
-              high: high
-          - id: qwen3.7-max
-            name: Qwen3.7 Max
-            contextWindow: 1000000
-            maxTokens: 131072
-            reasoningEfforts:
-              low: low
-              medium: medium
-              high: high
-          - id: qwen3.7-plus
-            name: Qwen3.7 Plus
-            contextWindow: 1000000
-            maxTokens: 65536
-            input: [text, image]
-            reasoningEfforts:
-              low: low
-              medium: medium
-              high: high
-          - id: qwen3.6-plus
-            name: Qwen3.6 Plus
-            contextWindow: 1000000
-            maxTokens: 65536
-            input: [text, image]
-            reasoningEfforts:
-              low: low
-              medium: medium
-              high: high
-          - id: qwen3.6-flash
-            name: Qwen3.6 Flash
-            contextWindow: 1000000
-            maxTokens: 65536
-            input: [text, image]
-            reasoningEfforts:
-              low: low
-              medium: medium
-              high: high
+# Configure it on the Models page, or by adding fields under this entry's
+# `config` (displayName, apiKeyEnv, baseURL, models, reasoning, headers).
+- insert:
+    - id: llm-aliyun
+      name: '@doitian/dsh-provider-aliyun'

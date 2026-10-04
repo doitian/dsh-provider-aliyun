@@ -1,7 +1,7 @@
 {
   "name": "@doitian/dsh-provider-aliyun",
   "version": "0.1.0",
-  "description": "Aliyun DashScope (Bailian) model provider preset for DeepSeek Harness: adds an OpenAI-compatible `aliyun` route carrying the Qwen model catalog to the llm-pi-ai adapter.",
+  "description": "Aliyun DashScope (Bailian) model provider for DeepSeek Harness: registers an `aliyun` route carrying the Qwen model catalog, so the model list ships in the package instead of a profile.",
   "keywords": [
     "dsh",
     "dsh-plugin",
@@ -29,11 +29,16 @@
   "main": "lib/index.js",
   "exports": {
     ".": "./lib/index.js",
+    "./catalog": "./lib/catalog.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
   "files": [
     "lib/index.js",
+    "lib/adapter.js",
+    "lib/catalog.js",
+    "lib/models.js",
+    "lib/provider.js",
     "cordis.patch.yml"
   ],
   "publishConfig": {
@@ -44,13 +49,33 @@
   },
   "scripts": {
     "validate": "node scripts/validate.mjs",
-    "prepack": "node scripts/validate.mjs"
+    "test": "node --test test/",
+    "prepack": "npm run validate && npm run test"
   },
-  "devDependencies": {
-    "js-yaml": "^4.1.0"
+  "dependencies": {
+    "@earendil-works/pi-ai": "^0.87.1"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "~4.0.4"
+    "@deepseek-ai/cordis": "~4.0.4",
+    "@deepseek-ai/dsh-llm": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-llm-pi-ai": "0.2.0-rc.2",
+    "@deepseek-ai/schemastery": "~3.18.4"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.4",
+    "@deepseek-ai/dsh-attachment": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-authorization": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-brand": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-credentials": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-fs": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-launch-environment": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-llm": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-llm-pi-ai": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-timeout": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-util-values": "0.2.0-rc.2",
+    "@deepseek-ai/schemastery": "3.18.4",
+    "@earendil-works/pi-ai": "0.87.1",
+    "js-yaml": "^4.1.0"
   },
   "dsh": {
     "bundle": {
