@@ -231,6 +231,19 @@ npm test           # drives the real PiAiAdapter, the merge, and the listing sta
 
 `npm test` needs the peer packages installed — that is the point, since it exercises the real adapter rather than a stub. A live request is out of scope: that needs a real key and endpoint. Discovery is tested with an injected `fetch`, so what is covered is every decision *around* the request — the shapes it reads, what a failure leaves in place, and how long a read may wait.
 
+### Testing a build against the desktop app
+
+```bash
+npm run link:desktop   # point the desktop profile at this checkout, then verify the copy
+npm run probe          # what the picker will show, read from the live endpoint
+```
+
+Then **restart DSH**: plugin modules are loaded once at startup, and the loader does not watch them.
+
+`link:desktop` exists because a local dependency is not a live view of the worktree. pnpm hard-links a `file:` package into the profile, so an edit that *replaces* a file — `git checkout`, or any editor that saves atomically — leaves the installed copy on the previous bytes, and a plain `install`, `--force`, or `update` will not re-link it ("Already up to date", even when the directory is deleted). Re-adding the dependency is what forces a fresh resolution, and the script verifies the result byte for byte instead of assuming it worked.
+
+Two things to expect while testing this way. The Plugins page may rewrite the dependency back to a registry range — that is a normal package install, and `link:desktop` switches it back. And a *published* release is the durable alternative: the app then installs it like any other plugin, and nothing local is involved.
+
 ## Publishing
 
 Publishing uses **npm trusted publishing** (OIDC) from `.github/workflows/publish.yml`. There is no npm token anywhere: no `NODE_AUTH_TOKEN`, no `NPM_TOKEN`, no secret. The workflow declares `id-token: write` and runs `npm publish`, which exchanges that OIDC identity for a short-lived publish token.
