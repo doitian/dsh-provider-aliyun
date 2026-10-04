@@ -17,7 +17,14 @@ import { test } from 'node:test'
 import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
 
 import { createAliyunAdapter, DEFAULT_STREAM_IDLE_TIMEOUT_MS } from '../lib/adapter.js'
-import { DEFAULT_API_KEY_ENV, DEFAULT_BASE_URL, FALLBACK_MODELS, ROUTE } from '../lib/catalog.js'
+import {
+  CHAT_MODEL_PATTERNS,
+  DEFAULT_API_KEY_ENV,
+  DEFAULT_BASE_URL,
+  FALLBACK_MODELS,
+  NON_CHAT_MODEL_PATTERNS,
+  ROUTE,
+} from '../lib/catalog.js'
 import { apply } from '../lib/index.js'
 import { mergeCatalog } from '../lib/models.js'
 
@@ -192,6 +199,9 @@ test('mounting registers the route, its settings row, and its discovery', () => 
     headers: undefined,
     discovery: {
       enabled: true,
+      filter: 'chat',
+      include: [...CHAT_MODEL_PATTERNS],
+      exclude: [...NON_CHAT_MODEL_PATTERNS],
       ttlMs: 600_000,
       waitMs: 0,
       timeoutMs: 15_000,

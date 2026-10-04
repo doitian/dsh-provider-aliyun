@@ -184,14 +184,58 @@ function checkDiscoveryDefaults(defaults) {
   }
 }
 
+/**
+ * Confirm the default membership filter compiles and recognizes this package's
+ * own catalog.
+ *
+ * A pattern that does not compile is skipped at runtime with a warning, so a
+ * typo would quietly widen or narrow what every deployment advertises. And a
+ * shipped model the default filter would not match means the package's own
+ * shortlist and its own default disagree — the kind of thing that only shows up
+ * as a model missing from someone's picker.
+ */
+function checkPatterns(include, exclude, catalog) {
+  const at = 'lib/catalog.js'
+  const compiled = []
+  for (const [name, sources] of [['CHAT_MODEL_PATTERNS', include], ['NON_CHAT_MODEL_PATTERNS', exclude]]) {
+    if (!Array.isArray(sources) || sources.length === 0) {
+      fail(`${at}: ${name} must be a non-empty list of regular expressions`)
+      continue
+    }
+    for (const source of sources) {
+      if (typeof source !== 'string' || source.length === 0) {
+        fail(`${at}: ${name} has an empty pattern`)
+        continue
+      }
+      try {
+        const pattern = new RegExp(source, 'i')
+        if (name === 'CHAT_MODEL_PATTERNS') compiled.push(pattern)
+      } catch (error) {
+        fail(`${at}: ${name} pattern ${JSON.stringify(source)} is not a valid regular expression — ${error.message}`)
+      }
+    }
+  }
+  for (const entry of catalog) {
+    if (!compiled.some((pattern) => pattern.test(entry.id))) {
+      fail(`${at}: shipped model "${entry.id}" matches no CHAT_MODEL_PATTERNS entry, so the default filter would not advertise it`)
+    }
+  }
+}
+
 async function main() {
   const manifest = readJson('package.json')
   const patchRelative = checkManifest(manifest)
   if (patchRelative) checkPatch(patchRelative, manifest)
 
-  const { DISCOVERY_DEFAULTS, FALLBACK_MODELS } = await import('../lib/catalog.js')
+  const {
+    CHAT_MODEL_PATTERNS,
+    DISCOVERY_DEFAULTS,
+    FALLBACK_MODELS,
+    NON_CHAT_MODEL_PATTERNS,
+  } = await import('../lib/catalog.js')
   checkCatalog(FALLBACK_MODELS)
   checkDiscoveryDefaults(DISCOVERY_DEFAULTS)
+  checkPatterns(CHAT_MODEL_PATTERNS, NON_CHAT_MODEL_PATTERNS, FALLBACK_MODELS)
 
   if (problems.length > 0) {
     console.error(`validate: ${problems.length} problem(s)`)
@@ -202,6 +246,7 @@ async function main() {
   console.log(`  package: ${manifest.name}@${manifest.version}`)
   console.log(`  patch:   ${patchRelative}`)
   console.log(`  models:  ${FALLBACK_MODELS.length} fallback (${FALLBACK_MODELS.map((m) => m.id).join(', ')})`)
+  console.log(`  filter:  ${CHAT_MODEL_PATTERNS.length} include / ${NON_CHAT_MODEL_PATTERNS.length} exclude patterns`)
 }
 
 main().catch((error) => {

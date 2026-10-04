@@ -12,11 +12,13 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import {
+  CHAT_MODEL_PATTERNS,
   DEFAULT_API_KEY_ENV,
   DEFAULT_BASE_URL,
   DISCOVERY_TTL_MS,
   DISCOVERY_WAIT_MS,
   FALLBACK_MODELS,
+  NON_CHAT_MODEL_PATTERNS,
 } from '../lib/catalog.js'
 import { DEFAULT_DISCOVERY_TIMEOUT_MS } from '../lib/discovery.js'
 import { Config } from '../lib/index.js'
@@ -30,6 +32,9 @@ test('an empty config mounts a working, discovering route', () => {
   assert.deepEqual(config.models.map((entry) => entry.id), FALLBACK_MODELS.map((entry) => entry.id))
 
   assert.equal(config.discovery.enabled, true)
+  assert.equal(config.discovery.filter, 'chat')
+  assert.deepEqual([...config.discovery.include], [...CHAT_MODEL_PATTERNS])
+  assert.deepEqual([...config.discovery.exclude], [...NON_CHAT_MODEL_PATTERNS])
   assert.equal(config.discovery.ttlMs, DISCOVERY_TTL_MS)
   assert.equal(config.discovery.waitMs, DISCOVERY_WAIT_MS)
   assert.equal(config.discovery.timeoutMs, DEFAULT_DISCOVERY_TIMEOUT_MS)
