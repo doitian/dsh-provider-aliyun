@@ -49,7 +49,7 @@
   },
   "scripts": {
     "validate": "node scripts/validate.mjs",
-    "test": "node --test test/",
+    "test": "node --test",
     "prepack": "npm run validate && npm run test"
   },
   "dependencies": {
