@@ -1,6 +1,6 @@
 {
   "name": "@doitian/dsh-provider-aliyun",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Aliyun DashScope (Bailian) model provider for DeepSeek Harness: registers an `aliyun` route whose model list comes from the configured endpoint itself, with a shipped fallback catalog for capacities and offline use.",
   "keywords": [
     "dsh",
