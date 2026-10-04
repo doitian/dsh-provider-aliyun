@@ -38,6 +38,7 @@
     "lib/adapter.js",
     "lib/catalog.js",
     "lib/discovery.js",
+    "lib/metadata.json",
     "lib/models.js",
     "lib/provider.js",
     "cordis.patch.yml"
@@ -50,6 +51,8 @@
   },
   "scripts": {
     "validate": "node scripts/validate.mjs",
+    "probe": "node scripts/probe.mjs",
+    "generate:metadata": "node scripts/generate-metadata.mjs",
     "test": "node --test",
     "prepack": "npm run validate && npm run test"
   },

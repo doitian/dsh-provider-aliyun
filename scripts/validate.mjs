@@ -58,7 +58,7 @@ function checkManifest(manifest) {
   for (const entry of files) {
     if (!existsSync(join(root, entry))) fail(`package.json: "files" names "${entry}", which does not exist`)
   }
-  for (const needed of ['lib/adapter.js', 'lib/catalog.js', 'lib/discovery.js', 'lib/models.js', 'lib/provider.js']) {
+  for (const needed of ['lib/adapter.js', 'lib/catalog.js', 'lib/discovery.js', 'lib/metadata.json', 'lib/models.js', 'lib/provider.js']) {
     if (!files.includes(needed)) fail(`package.json: "files" must include "${needed}" (imported by the plugin)`)
   }
 
@@ -222,6 +222,40 @@ function checkPatterns(include, exclude, catalog) {
   }
 }
 
+/**
+ * Confirm the generated metadata snapshot carries usable facts.
+ *
+ * It is generated data, so the shape is what can be checked here — a unit
+ * change or a wrong provider would reach a picker as wrong capacities, which is
+ * the one failure this package cannot detect for itself at run time.
+ */
+function checkMetadata(snapshot) {
+  const at = 'lib/metadata.json'
+  if (!isPlainObject(snapshot)) return fail(`${at} must be a JSON object`)
+  if (typeof snapshot.source !== 'string' || snapshot.source.length === 0) fail(`${at}: "source" must name where the facts came from`)
+  if (!Array.isArray(snapshot.providers) || snapshot.providers.length === 0) fail(`${at}: "providers" must list the registries merged`)
+  if (Number.isNaN(Date.parse(snapshot.generatedAt))) fail(`${at}: "generatedAt" must be a date`)
+  const models = snapshot.models
+  if (!isPlainObject(models) || Object.keys(models).length === 0) return fail(`${at}: "models" must be a non-empty object`)
+  for (const [id, facts] of Object.entries(models)) {
+    if (!isPlainObject(facts)) {
+      fail(`${at}: "${id}" must be an object`)
+      continue
+    }
+    for (const field of ['contextWindow', 'maxTokens']) {
+      if (!isPositiveInteger(facts[field])) fail(`${at}: "${id}" ${field} must be a positive integer`)
+    }
+    if (!Array.isArray(facts.input) || facts.input.length === 0) {
+      fail(`${at}: "${id}" input must be a non-empty list`)
+    } else {
+      for (const modality of facts.input) {
+        if (!MODALITIES.includes(modality)) fail(`${at}: "${id}" input names "${modality}", which is not a modality`)
+      }
+    }
+    if (typeof facts.reasoning !== 'boolean') fail(`${at}: "${id}" reasoning must be a boolean`)
+  }
+}
+
 async function main() {
   const manifest = readJson('package.json')
   const patchRelative = checkManifest(manifest)
@@ -236,6 +270,13 @@ async function main() {
   checkCatalog(FALLBACK_MODELS)
   checkDiscoveryDefaults(DISCOVERY_DEFAULTS)
   checkPatterns(CHAT_MODEL_PATTERNS, NON_CHAT_MODEL_PATTERNS, FALLBACK_MODELS)
+  const metadata = readJson('lib/metadata.json')
+  checkMetadata(metadata)
+  for (const entry of FALLBACK_MODELS) {
+    if (!(entry.id in (metadata.models ?? {}))) {
+      fail(`lib/metadata.json: shipped model "${entry.id}" is missing, so its facts would come from the fallback catalog alone`)
+    }
+  }
 
   if (problems.length > 0) {
     console.error(`validate: ${problems.length} problem(s)`)
@@ -247,6 +288,7 @@ async function main() {
   console.log(`  patch:   ${patchRelative}`)
   console.log(`  models:  ${FALLBACK_MODELS.length} fallback (${FALLBACK_MODELS.map((m) => m.id).join(', ')})`)
   console.log(`  filter:  ${CHAT_MODEL_PATTERNS.length} include / ${NON_CHAT_MODEL_PATTERNS.length} exclude patterns`)
+  console.log(`  facts:   ${Object.keys(metadata.models).length} from ${metadata.providers.join(' + ')} (${metadata.generatedAt.slice(0, 10)})`)
 }
 
 main().catch((error) => {
