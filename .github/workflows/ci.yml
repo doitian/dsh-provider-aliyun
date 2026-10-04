@@ -11,12 +11,19 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    strategy:
+      # `engines` declares >=22 while the workflows pin 24, so both are tested:
+      # 22 is the version a user can be on that this package could still break.
+      # fail-fast stays off so one broken version does not hide the other.
+      fail-fast: false
+      matrix:
+        node: ['22', '24']
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: ${{ matrix.node }}
 
       # The peer set is real code, not types: the test drives the published
       # @deepseek-ai/dsh-llm-pi-ai adapter, so the install is what makes this
