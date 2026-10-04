@@ -1,0 +1,38 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # The peer set is real code, not types: the test drives the published
+      # @deepseek-ai/dsh-llm-pi-ai adapter, so the install is what makes this
+      # check meaningful.
+      - run: npm ci
+
+      - name: Validate the manifest, patch and shipped catalog
+        run: npm run validate
+
+      - name: Drive the real adapter against the catalog
+        run: npm test
+
+      - name: Check what the tarball would actually contain
+        run: |
+          npm pack --dry-run 2>&1 | tee "$RUNNER_TEMP/pack.txt"
+          for required in cordis.patch.yml lib/index.js lib/adapter.js lib/catalog.js package.json; do
+            grep -q "$required" "$RUNNER_TEMP/pack.txt" \
+              || { echo "::error::$required is missing from the published tarball"; exit 1; }
+          done

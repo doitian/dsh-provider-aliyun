@@ -1,0 +1,61 @@
+name: publish
+
+# Publishes with npm trusted publishing (OIDC). There is deliberately no
+# NODE_AUTH_TOKEN and no NPM_TOKEN secret anywhere in this workflow: adding one
+# would disable the OIDC exchange and make the publish fail.
+#
+# One-time setup, by the package owner (npm 11.6 or later):
+#
+#   npm login
+#   npm trust github @doitian/dsh-provider-aliyun \
+#     --file publish.yml \
+#     --repo doitian/dsh-provider-aliyun \
+#     --allow-publish
+#
+# --allow-publish is required (it grants CREATE_PACKAGE); add --dry-run first to
+# see what it would create. Omit --environment, matching this job, which declares
+# no `environment:`. If the registry reports the package as missing, publish
+# 0.1.0 once by hand and attach the publisher afterwards.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # exchanged for a short-lived publish token; required
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+
+      - run: npm ci
+
+      - name: Validate the manifest, patch and shipped catalog
+        run: npm run validate
+
+      - name: Drive the real adapter against the catalog
+        run: npm test
+
+      - name: Require the release tag to match package.json
+        if: github.event_name == 'release'
+        run: |
+          pkg=$(node -p "require('./package.json').version")
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$pkg" != "$tag" ]; then
+            echo "::error::tag '$tag' does not match package.json version '$pkg'"
+            exit 1
+          fi
+
+      # `npm publish`, not `pnpm publish`: pnpm does not perform the OIDC
+      # trusted-publishing exchange.
+      - name: Publish to npm
+        run: npm publish --access public
