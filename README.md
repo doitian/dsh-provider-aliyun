@@ -185,6 +185,18 @@ npm trust github @doitian/dsh-provider-aliyun \
 
 `--allow-publish` is required: it grants the `CREATE_PACKAGE` permission, and the command refuses without it or `--allow-stage-publish`. It infers `owner/repo` from `package.json` when `--repo` is omitted, warns when the two disagree, requires 2FA, and prompts for an OTP. Add `--dry-run` first to see exactly what it would create without committing it.
 
+**A bypass-2FA token cannot do this step.** npm is retiring tokens that bypass 2FA, and the
+restriction is asymmetric: such a token still *publishes*, but the registry refuses it for
+publisher management with
+
+```
+Granular access tokens that bypass two-factor authentication may not perform this action.
+```
+
+So the bootstrap publish can come from a bypass token, while attaching the publisher needs an
+interactive `npm login` session or the website form. Reading the config back is refused for
+the same reason, so the release itself is the practical check.
+
 `--environment` is deliberately omitted, matching the publish job, which declares no `environment:`.
 
 If the registry reports the package as missing, a trusted publisher cannot be attached to a name that does not exist yet: publish `0.1.0` once by hand, then run the command above and let the workflow own every release after that.
