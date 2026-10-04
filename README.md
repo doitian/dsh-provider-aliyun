@@ -2,7 +2,7 @@
 
 Aliyun **DashScope (Bailian)** as a model provider for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
 
-The plugin registers one provider route, `aliyun`, and **owns it outright** — endpoint, credential reference, protocol, and the Qwen model catalog. The catalog is a file in this package, so the model list moves forward with `pnpm update` and never has to be written into a profile.
+The plugin registers one provider route, `aliyun`, and **owns it outright** — endpoint, credential reference, protocol, and the model catalog. The catalog is *live*: the route asks the configured endpoint which models it serves (`GET {baseURL}/models`), so a model Aliyun publishes tomorrow is selectable without a package release. A shipped fallback list covers the time before the first listing arrives, and supplies the capacities a listing does not disclose.
 
 ```yaml
 provider: aliyun
@@ -17,17 +17,19 @@ This package takes the other route. It registers its own route on the LLM seam a
 
 | | Config-only route | This plugin |
 |---|---|---|
-| Where the model list lives | your `cordis.patch.yml` | `lib/catalog.js` in this package |
-| Adding a new Qwen model | edit your profile | `pnpm update` |
+| Where the model list comes from | your `cordis.patch.yml` | the endpoint, re-read as it ages |
+| Adding a model Aliyun starts serving | edit your profile | nothing — the next listing already has it |
+| Capacities for a model nobody listed | you write them | shipped for the fallback ids, conservative defaults otherwise |
 | Can a profile patch shadow it | — | no |
-| Your profile config | the whole provider block | nothing |
+| Your profile config | the whole provider block | nothing, or just a `baseURL` |
 
-The trade-off is honest: the plugin depends on an internal shape of the adapter it reuses (see [How it works](#how-it-works)), which a config-only route does not.
+The trade-off is honest: the plugin depends on internal shapes of the adapter and the discovery contract it uses (see [How it works](#how-it-works)), which a config-only route does not.
 
 ## Requirements
 
 - DeepSeek Harness `0.2.0-rc.2` with the `@deepseek-ai/dsh-base` bundle, which mounts the LLM seam this plugin registers on.
 - An Aliyun DashScope / Bailian API key.
+- **An endpoint that answers `GET {baseURL}/models`.** The workspace hosts and the public compatible-mode endpoints do; a deployment that does not still works — the route just advertises the fallback catalog, and you can hand-list models with `models` in configuration instead.
 - **No `aliyun` route configured through `llm-pi-ai`.** Two adapters cannot declare the same route: mounting this plugin while a profile still configures one fails with `configurable provider "aliyun" is already declared`. Remove that block from your profile patch first — that is the whole point of the plugin.
 
 ## Install
@@ -62,43 +64,100 @@ Nothing is needed to make the route exist, and no key is stored in this package 
 apiKeyEnv: ALIYUN_API_KEY   # the default
 ```
 
-**Settings → Models → Aliyun DashScope** → paste the key into the **API key** field. It is written write-only to `$DSH_HOME/.credentials.yaml` under `ALIYUN_API_KEY`, and never read back.
+Store it under `refs:` in `$DSH_HOME/.credentials.yaml`:
 
-Or export `ALIYUN_API_KEY` in the environment that launches DSH. Until the key resolves, selecting an Aliyun model fails immediately with `MISSING_CREDENTIAL`, before any network I/O.
+```yaml
+refs:
+  ALIYUN_API_KEY: sk-…
+```
+
+The store watches that file and reloads it on change, so a key added while DSH is running takes effect on the next request — and on the next model listing, which is what turns the fallback catalog into the endpoint's own. Or export `ALIYUN_API_KEY` in the environment that launches DSH; that layer wins over the file and is reported read-only. Until the key resolves, selecting an Aliyun model fails immediately with `MISSING_CREDENTIAL`, before any network I/O.
+
+> **The Models page has no field for this row.** A configuration surface renders a per-provider editor only for the `llm-deepseek` and `llm-pi-ai` namespaces; this plugin's own namespace shows the row, its missing-credential dot, and the hint that other fields live in `cordis.patch.yml`. That hint is right — the key goes in the file above, which is the same store the page writes to for the routes it does edit.
 
 ### Endpoints
 
 | Region | Endpoint |
 |---|---|
-| Mainland China (default) | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| Mainland China, public (default) | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
 | International | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` |
+| Bailian *workspace* | `https://llm-<workspace-id>.<region>.maas.aliyuncs.com/compatible-mode/v1` |
 
-Set it in the Models page, or by adding `baseURL` to this entry's `config`:
+A workspace endpoint is the per-workspace host the console hands out; keys are often issued against one, and the workspace id is yours, so it can only come from configuration:
 
 ```yaml
 - id: llm-aliyun
   name: '@doitian/dsh-provider-aliyun'
   config:
-    baseURL: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    baseURL: https://llm-<workspace-id>.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
 ```
+
+Keep the endpoint and the key from the same product: a workspace key is not interchangeable with the public compatible-mode endpoints, and a *Token Plan* key belongs to `token-plan.<region>.maas.aliyuncs.com` instead.
 
 ## Models
 
-`lib/catalog.js` is the catalog. It ships six Qwen models:
+The route advertises what the endpoint serves. On mount — and again whenever a listing goes stale or a credential is stored — the plugin calls `GET {baseURL}/models` and adopts the ids it finds, in the endpoint's own order. Within what the filter admits, membership follows that listing, removals included: a model Aliyun retires stops being selectable without a package release, and one it starts serving appears the same way.
 
-`qwen3.8-max`, `qwen3.8-flash`, `qwen3.7-max`, `qwen3.7-plus`, `qwen3.6-plus`, `qwen3.6-flash`
+Three things a listing does not do, and what happens instead:
 
-Capacities and thinking levels mirror the facts Aliyun publishes for its Qwen lineup. A catalog entry states only what is true of the *model* — id, display name, context window, output cap, accepted modalities, and thinking levels. The route, endpoint, protocol, and compatibility switches are filled in from configuration by `lib/models.js`, so updating the catalog never means touching pi-ai plumbing.
+| | Behaviour |
+|---|---|
+| Capacities | A listing discloses ids, not context windows. An id the fallback catalog names keeps its written facts; every other id gets the conservative defaults (`discovery.contextWindow`, `discovery.maxTokens`, `discovery.input`), because the harness trusts `contextWindow` when it compacts history and a generic number beats an invented precise one. |
+| Failure | A failed read changes nothing: the last good listing stays in effect, and before the first one the fallback catalog does. A listing that names nothing counts as a failure — `{"data":[]}` says nothing about what an endpoint serves. |
+| Latency | Only a model-list read waits for the endpoint, and only for `discovery.waitMs`. Every other read merely schedules a refresh, so a picker opened during a slow fetch shows what is already known. |
 
-**Verify capacities against your endpoint when you upgrade.** A wrong `contextWindow` is the failure that hurts, because the harness trusts it when it decides to compact history.
+The shipped fallback list is three models: `qwen3.8-max`, `deepseek-v4.1-flash`, `glm-5.3`. It is *also* the metadata table, which is the whole trick — anything worth naming here gets your numbers.
 
-### Updating the catalog
+**A listing is a catalogue, not a chat menu.** A workspace endpoint answers with everything the account can reach — on the workspace this plugin was developed against, 262 entries covering speech synthesis, speech recognition, image generation, embeddings, rerankers, realtime duplex models, and every legacy generation back to `qwen-7b-chat`. The listing discloses `id`, `object`, `created`, and `owned_by`, so *what an id is* cannot be read from the listing at all. Two things decide it instead, and the default uses both: name patterns from configuration, and the shipped metadata snapshot, which states outright whether a model reads and answers text. On that endpoint the three modes come out as:
 
-Edit `lib/catalog.js` and publish. Consumers get the new list with `pnpm update`.
+| `discovery.filter` | Advertised | What admits an id |
+|---|---|---|
+| `chat` (default) | 79 of 262 | the include patterns, or the snapshot knowing it as a chat model |
+| `patterns` | 44 of 262 | the include patterns alone — the tight picker |
+| `all` | 175 of 262 | everything the listing names, minus `exclude` |
 
-### Overriding models for one profile
+### Model facts
 
-`models` is a normal configuration field whose default is the shipped catalog, so a profile can replace it without forking:
+The listing carries no capacities, and the harness trusts `contextWindow` when it decides to compact history, so facts come from `lib/metadata.json`: a generated snapshot of [models.dev](https://models.dev)'s `alibaba-cn` and `alibaba` providers, committed here so nothing at run time depends on a third party. It covers 98 models with real context windows, output caps, accepted modalities, and whether a model can think — `qwen3.8-max` at 1M/131072, `qwen3-vl-plus` at 262144/32768 with image input, `kimi-k3`, `glm-5.3`, and so on.
+
+```bash
+npm run generate:metadata   # refresh lib/metadata.json from models.dev
+```
+
+Precedence is fixed, most authoritative first: an entry in `models` is used exactly as written, then the snapshot, then the conservative defaults below. Membership stays the endpoint's business — the snapshot only admits a model the endpoint actually listed, and a model newer than the snapshot is still advertised when a pattern matches it, just with default numbers. Regenerating is a normal code change: `npm test` fails if the snapshot and the shipped catalog disagree about a model they both name.
+
+**Verify capacities against your endpoint when you upgrade.** A wrong `contextWindow` is the failure that hurts.
+
+### Discovery configuration
+
+```yaml
+- id: llm-aliyun
+  name: '@doitian/dsh-provider-aliyun'
+  config:
+    discovery:
+      enabled: true          # false pins the route to `models`
+      filter: chat           # chat | patterns | all, as the table above
+      include:               # chat families to keep, as case-insensitive regular expressions
+        - '^qwen3\.8-(max|flash|omni-flash)$'
+      exclude:               # dropped in every mode, even when a pattern matched
+        - '-realtime$'
+      ttlMs: 600000          # how long a listing stays fresh; 0 asks on every read
+      waitMs: 2000           # longest a model list waits for a cold listing
+      timeoutMs: 15000       # idle bound on one listing request
+      contextWindow: 131072  # capacity for an id neither `models` nor the snapshot names
+      maxTokens: 32768
+      input: [text]
+```
+
+Two rules keep the filter from hiding something you asked for. An id named in `models` is advertised whatever the patterns and the snapshot say — naming a model is a stronger statement than either — and a pattern that does not compile is ignored with a warning instead of failing the mount. `include` and `exclude` replace the shipped defaults, so copy the ones you want to keep from `lib/catalog.js`. `exclude` is also the way to trim what the snapshot admits, e.g. `- '^siliconflow/'` to drop one vendor's aliases of models that are already listed canonically.
+
+Note what a discovered model gets for modalities: whatever the snapshot publishes, and `discovery.input` for everything else. A model neither source knows is advertised text-only, because neither a listing nor a guess says it accepts images; naming it in `models` settles the question.
+
+After a failed attempt the endpoint is left alone for a minute, so an unreachable host cannot make every read slow; storing or rotating the key retries immediately.
+
+### Pinning the catalog
+
+`models` decides the fallback membership *and* the metadata, and a profile can replace it without forking:
 
 ```yaml
 - id: llm-aliyun
@@ -114,13 +173,15 @@ Edit `lib/catalog.js` and publish. Consumers get the new list with `pnpm update`
         thinkingLevelMap: { low: low, medium: medium, high: high }
 ```
 
-The Models page edits the same field, showing the shipped catalog as inherited rows until the first edit materializes an override.
+With `discovery.enabled: false` this list is the entire route.
 
 ### Thinking
 
 Aliyun turns thinking on with a boolean `enable_thinking` rather than a reasoning-effort field, which is what `compat.thinkingFormat: 'qwen'` sends, and `supportsReasoningEffort: false` keeps an effort value off the wire where this endpoint would refuse it. The selected level still drives the boolean, so `off` genuinely turns thinking off.
 
 `thinkingLevelMap` on each catalog entry declares which levels a model offers and the wire spelling of each. A level left out is not offered; `off` is offered unless it is named in the map.
+
+A discovered model the fallback does not name is declared non-reasoning: a level map is a claim about a model, and claiming thinking it may not have would offer levels the endpoint can refuse. Name the model in `models` to give it levels.
 
 ## Uninstall
 
@@ -130,7 +191,7 @@ Remove it from `dsh.profile.bundles` (or delete the row on the Plugins page), th
 dsh plugin --profile <name> remove @doitian/dsh-provider-aliyun
 ```
 
-The credential in `$DSH_HOME/.credentials.yaml` is left untouched. Deleting the route on the Models page removes it only when its reference is exactly the page-derived `ALIYUN_API_KEY`; a custom reference is retained deliberately, because the page cannot prove it owns it.
+The credential in `$DSH_HOME/.credentials.yaml` is left untouched.
 
 ## How it works
 
@@ -148,11 +209,13 @@ and the patch inserts this package's own plugin entry:
       name: '@doitian/dsh-provider-aliyun'
 ```
 
-On mount, `lib/index.js` registers two things on the LLM seam: the `aliyun` route with an adapter, and a configurable-provider directory entry — the latter is what gives the route a row, and an API-key field, on the Models page.
+On mount, `lib/index.js` registers three things on the LLM seam: the `aliyun` route with an adapter, a configurable-provider directory entry — that is the row on the Models page, not an API-key field (see [Configure the API key](#configure-the-api-key)) — and a model-discovery offer for the entry's settings namespace, so a configuration surface can interrogate this route's endpoint with a draft credential.
 
 The adapter is `PiAiAdapter`, exported by `@deepseek-ai/dsh-llm-pi-ai`. It owns the hard part — harness history into pi-ai context, pi-ai events into harness stream chunks, image budgets, replay metadata, idle watchdogs — and reusing it is what keeps this package a catalog plus a few dozen lines instead of a second adapter implementation.
 
-**The one thing to know if you maintain this.** `PiAiAdapter` is driven by a route's *resolved profile*, a shape its package does not export as a type; `lib/adapter.js` reproduces it and documents every field it must carry. Model metadata is not read from that profile — it comes from the pi-ai model descriptors built out of the catalog, which is why the catalog can live here at all. A DSH upgrade that starts reading a new profile field breaks this plugin. `test/adapter.test.mjs` drives the real published adapter against the factory, so that break shows up as a failing test rather than as a broken route in someone's profile.
+**How the advertised catalog moves.** `lib/discovery.js` reads the endpoint's listing and holds one `ids` array; `lib/models.js` merges it with the fallback entries; `lib/adapter.js` swaps the profile *map* the adapter memoizes its snapshot by identity. An operation already in flight keeps the snapshot it started with, and the next read sees the new catalog — which is also why a refresh never interrupts a stream. The harness's session catalog calls `listModels()` per provider on every read, so the picker shows whatever the route advertises at that moment. Only `listModels` waits for a cold listing, and that wait lives in a two-line subclass rather than a reimplementation of the adapter.
+
+**The one thing to know if you maintain this.** `PiAiAdapter` is driven by a route's *resolved profile*, a shape its package does not export as a type; `lib/adapter.js` reproduces it and documents every field it must carry. Model metadata is not read from that profile — it comes from the pi-ai model descriptors built out of the catalog, which is why the catalog can live here at all. A DSH upgrade that starts reading a new profile field breaks this plugin. `test/adapter.test.mjs` drives the real published adapter against the factory, so that break shows up as a failing test rather than as a broken route in someone's profile. The discovery contract is a second such seam: `LlmModelDiscoveryRequest`, `registerModelDiscovery`, and the `attributionHeaders()` requirement on every provider HTTP request.
 
 The engine is pinned to the harness's own pi-ai: the dependency is `^0.87.1`, which resolves to exactly the `0.87.1` the harness installs, so both share one copy.
 
@@ -160,13 +223,13 @@ The engine is pinned to the harness's own pi-ai: the dependency is `^0.87.1`, wh
 
 ```bash
 npm install
-npm run validate   # manifest, patch wiring, catalog integrity
-npm test           # drives the real PiAiAdapter against the catalog
+npm run validate   # manifest, patch wiring, fallback catalog, discovery defaults
+npm test           # drives the real PiAiAdapter, the merge, and the listing state machine
 ```
 
-`scripts/validate.mjs` catches what would otherwise fail silently: a tarball that drops the patch, a patch that names the wrong package, a duplicate model id, a non-integer capacity, a level map pi-ai would read as offering nothing.
+`scripts/validate.mjs` catches what would otherwise fail silently: a tarball that drops the patch, a patch that names the wrong package, a duplicate model id, a non-integer capacity, a level map pi-ai would read as offering nothing, a discovery default that would produce a model the adapter cannot dispatch.
 
-`npm test` needs the peer packages installed — that is the point, since it exercises the real adapter rather than a stub. A live request is out of scope: that needs a real key and endpoint.
+`npm test` needs the peer packages installed — that is the point, since it exercises the real adapter rather than a stub. A live request is out of scope: that needs a real key and endpoint. Discovery is tested with an injected `fetch`, so what is covered is every decision *around* the request — the shapes it reads, what a failure leaves in place, and how long a read may wait.
 
 ## Publishing
 
@@ -197,6 +260,13 @@ So the bootstrap publish can come from a bypass token, while attaching the publi
 interactive `npm login` session or the website form. Reading the config back is refused for
 the same reason, so the release itself is the practical check.
 
+**Account two-factor authentication does not reach the workflow.** The publish job authenticates
+with an OIDC token, so no one-time password is involved and enabling 2FA on the npm account
+cannot break a release — v0.1.1 was published exactly this way. What 2FA does gate is the
+one-time publisher setup above: an account with 2FA can run `npm trust`, which is the step a
+2FA-bypassing token is refused. Publishing by hand from a terminal is the only flow that now
+asks for an OTP.
+
 `--environment` is deliberately omitted, matching the publish job, which declares no `environment:`.
 
 If the registry reports the package as missing, a trusted publisher cannot be attached to a name that does not exist yet: publish `0.1.0` once by hand, then run the command above and let the workflow own every release after that.
@@ -204,10 +274,14 @@ If the registry reports the package as missing, a trusted publisher cannot be at
 Then release:
 
 ```bash
-npm version patch
+npm version patch          # or skip it when the version is already committed in package.json
 git push --follow-tags
 gh release create v0.1.1 --generate-notes
 ```
+
+`npm version` writes the version, commits it, and tags it in one step. When the version you mean
+to release is already committed by hand — a feature release that bumped `minor` itself — tag that
+commit instead: `git tag v0.2.0 && git push --follow-tags`, then create the release for it.
 
 The publish job requires the release tag to match `package.json` (`v0.1.1` ↔ `0.1.1`) and re-runs validation and tests before uploading.
 
