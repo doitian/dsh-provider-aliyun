@@ -30,6 +30,7 @@
   "main": "lib/index.js",
   "exports": {
     ".": "./lib/index.js",
+    "./client": "./lib/client.js",
     "./catalog": "./lib/catalog.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
@@ -38,10 +39,12 @@
     "lib/index.js",
     "lib/adapter.js",
     "lib/catalog.js",
+    "lib/client.js",
     "lib/discovery.js",
     "lib/metadata.json",
     "lib/models.js",
     "lib/provider.js",
+    "docs/models-page-settings.md",
     "cordis.patch.yml"
   ],
   "publishConfig": {
@@ -86,6 +89,14 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-settings-models"
+      ]
     }
   }
 }

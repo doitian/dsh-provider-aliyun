@@ -2,18 +2,22 @@
 /**
  * Static validation for this provider bundle.
  *
- * It checks the two things that fail silently in a profile and loudly only at
+ * It checks the things that fail silently in a profile and loudly only at
  * runtime: the manifest-to-patch wiring (a tarball that drops the patch, or a
- * patch that names the wrong package), and the shipped catalog's integrity
- * (a duplicate id, a non-integer capacity, or a level map pi-ai would read as
- * "offers nothing").
+ * patch that names the wrong package), the shipped catalog's integrity (a
+ * duplicate id, a non-integer capacity, or a level map pi-ai would read as
+ * "offers nothing"), and the browser half (a bundle that registers nothing, or
+ * under the wrong module id, blanks the Models page row with no server-side
+ * symptom at all).
  *
  * It does not replace the harness: `test/adapter.test.mjs` drives the real
- * adapter, and the harness validates configuration when the profile composes.
+ * adapter, `test/live-config.test.mjs` drives the mount, and the harness
+ * validates configuration when the profile composes.
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { runInNewContext } from 'node:vm'
 
 import yaml from 'js-yaml'
 
@@ -21,6 +25,16 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 const MODALITIES = ['text', 'image']
+
+/**
+ * Modules the browser's frozen platform table already answers.
+ *
+ * A bundle outside the harness repository is expected to write its own controls
+ * rather than import harness client packages, which change shape without notice
+ * and blank the slot entry when one throws. Reading React from the table is the
+ * one exception, and it is required.
+ */
+const CLIENT_BASELINE_MODULES = ['react', 'react-dom', 'react/jsx-runtime', '@deepseek-ai/cordis']
 
 const problems = []
 const fail = (message) => problems.push(message)
@@ -58,7 +72,7 @@ function checkManifest(manifest) {
   for (const entry of files) {
     if (!existsSync(join(root, entry))) fail(`package.json: "files" names "${entry}", which does not exist`)
   }
-  for (const needed of ['lib/adapter.js', 'lib/catalog.js', 'lib/discovery.js', 'lib/metadata.json', 'lib/models.js', 'lib/provider.js']) {
+  for (const needed of ['lib/adapter.js', 'lib/catalog.js', 'lib/client.js', 'lib/discovery.js', 'lib/metadata.json', 'lib/models.js', 'lib/provider.js']) {
     if (!files.includes(needed)) fail(`package.json: "files" must include "${needed}" (imported by the plugin)`)
   }
 
@@ -100,6 +114,127 @@ function checkPatch(relative, manifest) {
   }
   if (typeof entry.id !== 'string' || entry.id.length === 0) {
     fail(`${relative}: the inserted entry needs a non-empty id (it becomes the settings namespace)`)
+  }
+}
+
+/**
+ * Confirm the manifest declares a browser half the client module system accepts.
+ *
+ * `dsh.client` is what makes the host compose a bundle row at all, and the
+ * composition refuses a declaration without a `./client` export — so a missing
+ * export is a plugin that mounts on the host and silently never appears in the
+ * page.
+ *
+ * @param {object} manifest - the package manifest.
+ * @returns {string | undefined} the client bundle path, relative to the root.
+ */
+function checkClientManifest(manifest) {
+  const decl = manifest?.dsh?.client
+  if (!isPlainObject(decl)) {
+    return fail('package.json: "dsh.client" must declare the browser half, or this plugin has no Models-page card')
+  }
+  if (decl.platform !== 'web') {
+    fail(`package.json: "dsh.client.platform" must be "web", found ${JSON.stringify(decl.platform)}`)
+  }
+  if (decl.immediately !== undefined && typeof decl.immediately !== 'boolean') {
+    fail('package.json: "dsh.client.immediately" must be a boolean when present')
+  }
+  for (const [field, value] of [['inject', decl.inject], ['external', decl.external]]) {
+    if (value === undefined) continue
+    if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string' || entry.length === 0)) {
+      fail(`package.json: "dsh.client.${field}" must be a list of package names`)
+    } else if (value.includes(manifest.name)) {
+      fail(`package.json: "dsh.client.${field}" must not name this package, which answers itself`)
+    }
+  }
+  const target = manifest.exports?.['./client']
+  if (typeof target !== 'string' || target.length === 0) {
+    fail('package.json: "exports" must map "./client" to the browser bundle, or the client module system refuses the declaration')
+    return undefined
+  }
+  const relative = target.replace(/^\.\//, '')
+  if (!(manifest.files ?? []).includes(relative)) {
+    fail(`package.json: "files" must include "${relative}", or npm drops the browser half from the tarball`)
+  }
+  if (!existsSync(join(root, relative))) {
+    fail(`package.json: "exports[\'./client\']" names "${relative}", which does not exist`)
+    return undefined
+  }
+  return relative
+}
+
+/**
+ * Load the browser bundle in a stub module system and check what it registered.
+ *
+ * The bundle cannot be built or type-checked here — it is written by hand in the
+ * loader's own format — so the useful check is behavioural: it registers exactly
+ * one factory, under this package's name, and that factory materializes into the
+ * `apply`/`inject` pair the client plugin table expects. A bundle that fails any
+ * of those blanks the row in the browser and reports nothing on the host.
+ *
+ * @param {object} manifest - the package manifest.
+ * @param {string} relative - the client bundle path.
+ */
+function checkClientBundle(manifest, relative) {
+  const at = relative
+  const source = readFileSync(join(root, relative), 'utf8')
+  const registrations = []
+  const requested = []
+  const sandbox = {
+    window: {
+      __ModuleLoader__: {
+        load: (registration) => registrations.push(registration),
+      },
+    },
+    console,
+    // `typeof document` is the bundle's own guard for a headless materialization.
+    document: undefined,
+  }
+  try {
+    runInNewContext(source, sandbox, { filename: relative })
+  } catch (error) {
+    return fail(`${at}: registering the bundle threw — ${error.message}`)
+  }
+
+  if (registrations.length !== 1) {
+    return fail(`${at}: expected exactly one window.__ModuleLoader__.load() call, found ${registrations.length}`)
+  }
+  const [registration] = registrations
+  if (registration.id !== manifest.name) {
+    fail(`${at}: the bundle must register under the package name ("${manifest.name}"), found ${JSON.stringify(registration.id)}`)
+  }
+  if (typeof registration.factory !== 'function') {
+    fail(`${at}: the registration needs a "factory" function`)
+    return
+  }
+
+  // The factory is the module: materializing it must yield the plugin's exports
+  // without touching anything it did not declare a request for.
+  let exports
+  try {
+    exports = registration.factory((specifier) => {
+      requested.push(specifier)
+      if (!CLIENT_BASELINE_MODULES.includes(specifier)) {
+        throw new Error(`the browser module table cannot answer "${specifier}"`)
+      }
+      return {}
+    })
+  } catch (error) {
+    return fail(`${at}: materializing the bundle threw — ${error.message}`)
+  }
+  if (!isPlainObject(exports)) return fail(`${at}: the factory must return the plugin's exports object`)
+  if (typeof exports.apply !== 'function') fail(`${at}: the client plugin must export "apply"`)
+  if (!Array.isArray(exports.inject) || exports.inject.length === 0) {
+    fail(`${at}: the client plugin must export a non-empty "inject" list`)
+  } else {
+    for (const service of exports.inject) {
+      if (typeof service !== 'string' || service.length === 0) fail(`${at}: "inject" must name client services`)
+    }
+  }
+  for (const specifier of new Set(requested)) {
+    if (!CLIENT_BASELINE_MODULES.includes(specifier)) {
+      fail(`${at}: requires "${specifier}" at module scope; a plugin outside the harness ships its own controls and takes only the module table's baseline`)
+    }
   }
 }
 
@@ -260,6 +395,8 @@ async function main() {
   const manifest = readJson('package.json')
   const patchRelative = checkManifest(manifest)
   if (patchRelative) checkPatch(patchRelative, manifest)
+  const clientRelative = checkClientManifest(manifest)
+  if (clientRelative) checkClientBundle(manifest, clientRelative)
 
   const {
     CHAT_MODEL_PATTERNS,
@@ -286,6 +423,7 @@ async function main() {
   console.log('validate: ok')
   console.log(`  package: ${manifest.name}@${manifest.version}`)
   console.log(`  patch:   ${patchRelative}`)
+  console.log(`  client:  ${clientRelative} (platform ${manifest.dsh.client.platform})`)
   console.log(`  models:  ${FALLBACK_MODELS.length} fallback (${FALLBACK_MODELS.map((m) => m.id).join(', ')})`)
   console.log(`  filter:  ${CHAT_MODEL_PATTERNS.length} include / ${NON_CHAT_MODEL_PATTERNS.length} exclude patterns`)
   console.log(`  facts:   ${Object.keys(metadata.models).length} from ${metadata.providers.join(' + ')} (${metadata.generatedAt.slice(0, 10)})`)

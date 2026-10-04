@@ -1,12 +1,16 @@
 /**
- * The configuration schema is the profile's contract, and two of its defaults
- * are load-bearing in a way a reader cannot see:
+ * The configuration schema is the profile's contract, and three of its
+ * properties are load-bearing in a way a reader cannot see:
  *
  * - `discovery` is a nested object, so a schema that failed to resolve the
  *   block's own defaults would hand `apply()` an `undefined` `enabled` — which
  *   reads as *off*, silently disabling the feature this package exists for.
  * - `models` must default to the shipped fallback, so an empty config still
  *   mounts a route with something to select.
+ * - The editable fields must be `.volatile()`. That is not a style choice: the
+ *   settings service refuses to write a field that is not volatile, so dropping
+ *   the mark silently removes this plugin's row from the Models page while every
+ *   other test here still passes.
  */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
@@ -21,10 +25,24 @@ import {
   NON_CHAT_MODEL_PATTERNS,
 } from '../lib/catalog.js'
 import { DEFAULT_DISCOVERY_TIMEOUT_MS } from '../lib/discovery.js'
-import { Config } from '../lib/index.js'
+import { Config, liveConfig } from '../lib/index.js'
+
+/** Fields the Models page card edits, and the nodes that make them writable. */
+const VOLATILE_FIELDS = ['displayName', 'apiKeyEnv', 'baseURL', 'models', 'reasoning', 'headers', 'discovery']
+
+test('every field the Models page edits is volatile', () => {
+  const config = Config({})
+  for (const field of VOLATILE_FIELDS) {
+    assert.equal(
+      typeof config[field]?.get,
+      'function',
+      `${field} must be volatile, or the settings service refuses to write it`,
+    )
+  }
+})
 
 test('an empty config mounts a working, discovering route', () => {
-  const config = Config({})
+  const config = liveConfig(Config({}))
 
   assert.equal(config.displayName, 'Aliyun DashScope')
   assert.equal(config.apiKeyEnv, DEFAULT_API_KEY_ENV)
@@ -44,7 +62,7 @@ test('an empty config mounts a working, discovering route', () => {
 })
 
 test('one discovery knob does not disturb the others', () => {
-  const config = Config({ discovery: { enabled: false } })
+  const config = liveConfig(Config({ discovery: { enabled: false } }))
 
   assert.equal(config.discovery.enabled, false)
   assert.equal(config.discovery.ttlMs, DISCOVERY_TTL_MS)
@@ -52,10 +70,22 @@ test('one discovery knob does not disturb the others', () => {
 })
 
 test('a profile can pin the whole catalog itself', () => {
-  const config = Config({
+  const config = liveConfig(Config({
     models: [{ id: 'glm-5.3', name: 'GLM-5.3', contextWindow: 1_000, maxTokens: 100, input: ['text'], reasoning: false }],
-  })
+  }))
 
   assert.deepEqual(config.models.map((entry) => entry.id), ['glm-5.3'])
   assert.equal(config.discovery.enabled, true)
+})
+
+test('liveConfig reads a plain config exactly as it reads volatile references', () => {
+  // `plainConfig` in the settings service hands the surface an already-unwrapped
+  // config, and the tests hand `apply` a hand-built one, so both shapes have to
+  // read the same way.
+  const plain = { displayName: 'Plain', apiKeyEnv: 'REF', baseURL: 'https://plain.example/v1', models: [] }
+  assert.deepEqual(liveConfig(plain).baseURL, 'https://plain.example/v1')
+  assert.deepEqual(liveConfig(plain).displayName, 'Plain')
+  // Absent nodes fall back to the schema's own defaults rather than throwing.
+  assert.equal(liveConfig(plain).discovery.filter, 'chat')
+  assert.equal(liveConfig(plain).discovery.maxTokens, 32_768)
 })

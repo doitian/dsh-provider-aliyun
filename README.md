@@ -73,7 +73,7 @@ refs:
 
 The store watches that file and reloads it on change, so a key added while DSH is running takes effect on the next request — and on the next model listing, which is what turns the fallback catalog into the endpoint's own. Or export `ALIYUN_API_KEY` in the environment that launches DSH; that layer wins over the file and is reported read-only. Until the key resolves, selecting an Aliyun model fails immediately with `MISSING_CREDENTIAL`, before any network I/O.
 
-> **The Models page has no field for this row.** A configuration surface renders a per-provider editor only for the `llm-deepseek` and `llm-pi-ai` namespaces; this plugin's own namespace shows the row, its missing-credential dot, and the hint that other fields live in `cordis.patch.yml`. That hint is right — the key goes in the file above, which is the same store the page writes to for the routes it does edit.
+> **A profile is not needed for this.** The Models page card below writes the key, the endpoint, and the model overrides, and an environment variable still wins over both.
 
 ### Endpoints
 
@@ -93,6 +93,22 @@ A workspace endpoint is the per-workspace host the console hands out; keys are o
 ```
 
 Keep the endpoint and the key from the same product: a workspace key is not interchangeable with the public compatible-mode endpoints, and a *Token Plan* key belongs to `token-plan.<region>.maas.aliyuncs.com` instead.
+
+## The Models page
+
+**Settings → Models** shows the `aliyun` row with a card under it that edits three things: the **endpoint**, the **API key**, and the **model overrides**. Saving writes the first and third into the profile's `cordis.patch.yml` through the settings service and the key into the credential store under whatever reference the profile names — so the page and a hand-written patch are the same configuration, and whichever one you use, the other one keeps working.
+
+Nothing needs a restart. The route's configuration is `.volatile()`, which is what makes it writable from a page at all, and the plugin re-reads it rather than being remounted: a new endpoint is what the next listing reads, and a new display name replaces the row in place.
+
+| Field | What it writes | Notes |
+|---|---|---|
+| Endpoint | `baseURL` | Clearing it unsets the override, so the shipped default returns. |
+| API key | the credential reference, no config field | Write-only: the page never reads a stored key back, only whether one is configured. The reference comes from `apiKeyEnv`, defaulting to `ALIYUN_API_KEY`. |
+| Model overrides | `models` | The pin list as JSON. **Reset to the shipped catalog** unsets the override. |
+
+Two things the card deliberately does not edit, because a provider-scoped control cannot decide them well: `discovery` (the membership filter and its pacing) and `headers`. Both stay in `cordis.patch.yml`. Reasoning effort is absent for the same reason the harness's own editor omits it — it is a per-*model* capability, so the picker offers each model its own levels.
+
+> **Why a card and not just a schema.** The Models page renders a per-provider editor only for the `llm-deepseek` and `llm-pi-ai` namespaces — a hardcoded pair, with every other namespace getting a hint and a disabled Apply. What the page does offer a plugin from outside the harness is a keyed extension slot, `settings.models.provider-card`, so this package ships a browser half that registers one card against its own row. See [docs/models-page-settings.md](docs/models-page-settings.md) for the full picture, including the schema-driven editor it *could* use if the page ever grew one.
 
 ## Models
 
@@ -209,7 +225,15 @@ and the patch inserts this package's own plugin entry:
       name: '@doitian/dsh-provider-aliyun'
 ```
 
-On mount, `lib/index.js` registers three things on the LLM seam: the `aliyun` route with an adapter, a configurable-provider directory entry — that is the row on the Models page, not an API-key field (see [Configure the API key](#configure-the-api-key)) — and a model-discovery offer for the entry's settings namespace, so a configuration surface can interrogate this route's endpoint with a draft credential.
+On mount, `lib/index.js` registers three things on the LLM seam: the `aliyun` route with an adapter, a configurable-provider directory entry — that is the row on the Models page — and a model-discovery offer for the entry's settings namespace, so a configuration surface can interrogate this route's endpoint with a draft credential. The same manifest also declares a browser half, which is what puts the card on that row:
+
+```json
+{ "dsh": { "client": { "platform": "web", "immediately": true, "inject": ["@deepseek-ai/dsh-client-ui-settings"] } } }
+```
+
+`lib/client.js` is that half. It is **not built**: it is hand-written in the browser's own module-loader format, taking React from the frozen platform module table and importing nothing else, because a harness client package changes shape without notice and a component that throws blanks its own slot entry. Its two collaborators are cordis services rather than modules — `ctx.configForms` for the revision-fenced settings write, `ctx.remote.credentials` for the key — which is the channel DSH directs cross-plugin collaboration through. `scripts/validate.mjs` loads the bundle in a stub module system and asserts what it registered, since a wrong module id has no host-side symptom at all.
+
+**Why the fields are volatile, and what that costs.** The settings service refuses a write to a field that is not `.volatile()`, so the mark is the price of a page field; in exchange the value becomes a reference read with `.get()` instead of a value resolved once at mount. That inverts the old contract — *"the configuration carries no volatile field, so a configuration change remounts the plugin"* — so the plugin now re-derives what the configuration owns: the adapter reads its route facts on every rebuild (`lib/adapter.js`), and `sync()` in `lib/index.js` rebuilds the discovery client when the endpoint moves and re-announces the catalog when the pin list or the filter does. It runs from every read as well as from `settings/document-updated`, and compares first, so the second call is free.
 
 The adapter is `PiAiAdapter`, exported by `@deepseek-ai/dsh-llm-pi-ai`. It owns the hard part — harness history into pi-ai context, pi-ai events into harness stream chunks, image budgets, replay metadata, idle watchdogs — and reusing it is what keeps this package a catalog plus a few dozen lines instead of a second adapter implementation.
 
@@ -217,19 +241,23 @@ The adapter is `PiAiAdapter`, exported by `@deepseek-ai/dsh-llm-pi-ai`. It owns 
 
 **The one thing to know if you maintain this.** `PiAiAdapter` is driven by a route's *resolved profile*, a shape its package does not export as a type; `lib/adapter.js` reproduces it and documents every field it must carry. Model metadata is not read from that profile — it comes from the pi-ai model descriptors built out of the catalog, which is why the catalog can live here at all. A DSH upgrade that starts reading a new profile field breaks this plugin. `test/adapter.test.mjs` drives the real published adapter against the factory, so that break shows up as a failing test rather than as a broken route in someone's profile. The discovery contract is a second such seam: `LlmModelDiscoveryRequest`, `registerModelDiscovery`, and the `attributionHeaders()` requirement on every provider HTTP request.
 
+A third seam is entirely on the client: `lib/client.js` reaches the page through the keyed `settings.models.provider-card` slot and the `configForms` service, neither of which this package owns. Two signs that one moved: the card is absent with `slot entry crashed in 'settings.models.provider-card'` in the browser console, or `ctx.configForms.get()` returns a scope whose writes the host refuses. `test/client.test.mjs` drives the bundle through a stub module system and asserts the registration, the controls, and the two-write save, which is as far as a check can go without a page.
+
 The engine is pinned to the harness's own pi-ai: the dependency is `^0.87.1`, which resolves to exactly the `0.87.1` the harness installs, so both share one copy.
 
 ## Development
 
 ```bash
 npm install
-npm run validate   # manifest, patch wiring, fallback catalog, discovery defaults
-npm test           # drives the real PiAiAdapter, the merge, and the listing state machine
+npm run validate   # manifest, patch wiring, fallback catalog, discovery defaults, browser half
+npm test           # drives the real PiAiAdapter, the mount, the merge, the listing state machine, and the card
 ```
 
-`scripts/validate.mjs` catches what would otherwise fail silently: a tarball that drops the patch, a patch that names the wrong package, a duplicate model id, a non-integer capacity, a level map pi-ai would read as offering nothing, a discovery default that would produce a model the adapter cannot dispatch.
+`scripts/validate.mjs` catches what would otherwise fail silently: a tarball that drops the patch, a patch that names the wrong package, a duplicate model id, a non-integer capacity, a level map pi-ai would read as offering nothing, a discovery default that would produce a model the adapter cannot dispatch — and, for the browser half, a bundle that registers nothing, registers under the wrong module id, exports no `apply`, or requires a harness client package instead of taking only React from the module table. That last one has no host-side symptom at all: the plugin mounts, the row appears, and the card is simply blank.
 
-`npm test` needs the peer packages installed — that is the point, since it exercises the real adapter rather than a stub. A live request is out of scope: that needs a real key and endpoint. Discovery is tested with an injected `fetch`, so what is covered is every decision *around* the request — the shapes it reads, what a failure leaves in place, and how long a read may wait.
+`npm test` needs the peer packages installed — that is the point, since it exercises the real adapter rather than a stub. A live request is out of scope: that needs a real key and endpoint. Discovery is tested with an injected `fetch`, so what is covered is every decision *around* the request — the shapes it reads, what a failure leaves in place, and how long a read may wait. `lib/client.js` is tested by loading it the way the page does and driving the card with a stub `React.createElement`, so its validation, its save order, and what a refused write leaves behind are all covered without a browser.
+
+> Under a DSH file sandbox, `npm test` fails with `spawn EPERM`: Node's test runner starts one child process per file, and the sandbox blocks the pipes. Run `node --test --test-isolation=none` to execute the same suite in one process.
 
 ### Testing a build against the desktop app
 
@@ -240,7 +268,9 @@ npm run probe          # what the picker will show, read from the live endpoint
 
 Then **restart DSH**: plugin modules are loaded once at startup, and the loader does not watch them.
 
-`link:desktop` exists because a local dependency is not a live view of the worktree. pnpm hard-links a `file:` package into the profile, so an edit that *replaces* a file — `git checkout`, or any editor that saves atomically — leaves the installed copy on the previous bytes, and a plain `install`, `--force`, or `update` will not re-link it ("Already up to date", even when the directory is deleted). Re-adding the dependency is what forces a fresh resolution, and the script verifies the result byte for byte instead of assuming it worked.
+`link:desktop` exists because a local dependency is not a live view of the worktree. pnpm hard-links a `file:` package into the profile, so an edit that *replaces* a file — `git checkout`, or any editor that saves atomically — leaves the installed copy on the previous bytes, and a plain `install`, `--force`, or `update` will not re-link it ("Already up to date", even when the directory is deleted).
+
+Re-adding the dependency is what forces a fresh resolution, but on its own it is not always enough: pnpm treats a spec that already resolves as up to date, so a second run can still leave the previous bytes behind. The script verifies the result byte for byte instead of assuming it worked, and when that check fails it drops the dependency and resolves it again rather than printing a mismatch for you to work around.
 
 Two things to expect while testing this way. The Plugins page may rewrite the dependency back to a registry range — that is a normal package install, and `link:desktop` switches it back. And a *published* release is the durable alternative: the app then installs it like any other plugin, and nothing local is involved.
 

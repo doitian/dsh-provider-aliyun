@@ -30,18 +30,27 @@ import { mergeCatalog } from '../lib/models.js'
 
 const DEFAULTS = { contextWindow: 131_072, maxTokens: 32_768, input: ['text'] }
 
-/** Build an adapter over the fallback catalog, with a stub credential. */
+/**
+ * Build an adapter over the fallback catalog, with a stub credential.
+ *
+ * The route facts arrive as a getter, matching what the mount passes: the plugin
+ * reads its configuration fresh so a settings write moves the route under a
+ * mounted adapter. `facts` is returned so a test can move one and prove it.
+ */
 function makeAdapter(overrides = {}) {
-  return createAliyunAdapter({
-    displayName: 'Aliyun DashScope',
-    apiKeyEnv: DEFAULT_API_KEY_ENV,
-    baseURL: DEFAULT_BASE_URL,
-    models: FALLBACK_MODELS,
-    reasoning: undefined,
-    headers: undefined,
-    resolveApiKey: async () => 'test-key',
-    ...overrides,
-  })
+  const {
+    displayName = 'Aliyun DashScope',
+    apiKeyEnv = DEFAULT_API_KEY_ENV,
+    baseURL = DEFAULT_BASE_URL,
+    reasoning,
+    headers,
+    ...rest
+  } = overrides
+  const facts = { displayName, apiKeyEnv, baseURL, reasoning, headers }
+  return {
+    ...createAliyunAdapter({ facts: () => facts, models: FALLBACK_MODELS, resolveApiKey: async () => 'test-key', ...rest }),
+    facts,
+  }
 }
 
 test('advertises exactly the fallback catalog before any listing arrives', async () => {
@@ -167,6 +176,7 @@ test('mounting registers the route, its settings row, and its discovery', () => 
   const directory = []
   const discoveries = []
   const credentialListeners = []
+  const presentations = []
   const ctx = {
     fiber: { entry: { options: { id: 'llm-aliyun' } } },
     llm: {
@@ -183,11 +193,25 @@ test('mounting registers the route, its settings row, and its discovery', () => 
         return () => {}
       },
     },
+    inject: (names, callback) => {
+      assert.deepEqual(names, ['settings'])
+      callback({
+        effect: (register) => {
+          register()
+        },
+        settings: {
+          configure: (policy, owner) => {
+            presentations.push({ policy, owner })
+            return () => {}
+          },
+        },
+      })
+    },
     on: (event, listener) => {
       credentialListeners.push({ event, listener })
     },
     get: () => undefined,
-    logger: { warn() {} },
+    logger: { warn() {}, debug() {} },
   }
 
   apply(ctx, {
@@ -228,7 +252,14 @@ test('mounting registers the route, its settings row, and its discovery', () => 
   assert.equal(discoveries.length, 1)
   assert.equal(discoveries[0].settingsNs, 'llm-aliyun')
   assert.equal(typeof discoveries[0].discover, 'function')
-  assert.deepEqual(credentialListeners.map((listener) => listener.event), ['credentials/reference-updated'])
+  assert.deepEqual(
+    credentialListeners.map((listener) => listener.event),
+    ['credentials/reference-updated', 'settings/document-updated'],
+  )
+
+  // The plugin ships its own Models-page card, so it tells the settings service
+  // not to auto-generate a page from its schema.
+  assert.deepEqual(presentations, [{ policy: { auto: false }, owner: ctx.fiber }])
 })
 
 test('a listing that arrives moves the catalog and tells the surfaces', async () => {
@@ -258,8 +289,9 @@ test('a listing that arrives moves the catalog and tells the surfaces', async ()
         registerModelDiscovery: () => () => {},
       },
       on: () => {},
+      inject: () => {},
       get: (name) => (name === 'credentials' ? { resolve: async () => ({ value: 'sk-test' }) } : undefined),
-      logger: { warn() {} },
+      logger: { warn() {}, debug() {} },
     }
 
     apply(ctx, {
