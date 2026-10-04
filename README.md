@@ -172,13 +172,22 @@ npm test           # drives the real PiAiAdapter against the catalog
 
 Publishing uses **npm trusted publishing** (OIDC) from `.github/workflows/publish.yml`. There is no npm token anywhere: no `NODE_AUTH_TOKEN`, no `NPM_TOKEN`, no secret. The workflow declares `id-token: write` and runs `npm publish`, which exchanges that OIDC identity for a short-lived publish token.
 
-One-time setup, in the package owner's npm account:
+One-time setup, as the package owner. npm 11.6 or later creates the publisher from the CLI — the same operation as the website form, without the form:
 
-1. npmjs.com → the package → **Settings** → **Trusted Publisher** → **GitHub Actions**
-   - Repository: `doitian/dsh-provider-aliyun`
-   - Workflow filename: `publish.yml`
-   - Environment: leave empty
-2. If npm requires the package to already exist before a trusted publisher can be attached, publish `0.1.0` once by hand; the workflow owns every release after that.
+```bash
+npm login   # as doitian
+
+npm trust github @doitian/dsh-provider-aliyun \
+  --file publish.yml \
+  --repo doitian/dsh-provider-aliyun \
+  --allow-publish
+```
+
+`--allow-publish` is required: it grants the `CREATE_PACKAGE` permission, and the command refuses without it or `--allow-stage-publish`. It infers `owner/repo` from `package.json` when `--repo` is omitted, warns when the two disagree, requires 2FA, and prompts for an OTP. Add `--dry-run` first to see exactly what it would create without committing it.
+
+`--environment` is deliberately omitted, matching the publish job, which declares no `environment:`.
+
+If the registry reports the package as missing, a trusted publisher cannot be attached to a name that does not exist yet: publish `0.1.0` once by hand, then run the command above and let the workflow own every release after that.
 
 Then release:
 
