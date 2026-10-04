@@ -37,6 +37,7 @@
     "lib/index.js",
     "lib/adapter.js",
     "lib/catalog.js",
+    "lib/discovery.js",
     "lib/models.js",
     "lib/provider.js",
     "cordis.patch.yml"

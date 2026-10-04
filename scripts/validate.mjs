@@ -58,7 +58,7 @@ function checkManifest(manifest) {
   for (const entry of files) {
     if (!existsSync(join(root, entry))) fail(`package.json: "files" names "${entry}", which does not exist`)
   }
-  for (const needed of ['lib/adapter.js', 'lib/catalog.js', 'lib/models.js', 'lib/provider.js']) {
+  for (const needed of ['lib/adapter.js', 'lib/catalog.js', 'lib/discovery.js', 'lib/models.js', 'lib/provider.js']) {
     if (!files.includes(needed)) fail(`package.json: "files" must include "${needed}" (imported by the plugin)`)
   }
 
@@ -106,7 +106,7 @@ function checkPatch(relative, manifest) {
 /** Confirm every shipped model is one the adapter can dispatch. */
 function checkCatalog(catalog) {
   if (!Array.isArray(catalog) || catalog.length === 0) {
-    return fail('lib/catalog.js: ALIYUN_MODELS must be a non-empty array')
+    return fail('lib/catalog.js: FALLBACK_MODELS must be a non-empty array')
   }
   const seen = new Set()
   for (const entry of catalog) {
@@ -162,13 +162,36 @@ function checkCatalog(catalog) {
   }
 }
 
+/**
+ * Confirm the capacities discovery hands an unknown id are usable.
+ *
+ * These are the values an endpoint-discovered model nobody listed gets, so a
+ * zero, a fraction, or an empty modality list would produce a model the adapter
+ * cannot dispatch — silently, because no catalog entry states it.
+ */
+function checkDiscoveryDefaults(defaults) {
+  const at = 'lib/catalog.js: DISCOVERY_DEFAULTS'
+  if (!isPlainObject(defaults)) return fail(`${at} must be an object`)
+  for (const field of ['contextWindow', 'maxTokens']) {
+    if (!isPositiveInteger(defaults[field])) fail(`${at}.${field} must be a positive integer`)
+  }
+  if (!Array.isArray(defaults.input) || defaults.input.length === 0) {
+    fail(`${at}.input must be a non-empty list`)
+  } else {
+    for (const modality of defaults.input) {
+      if (!MODALITIES.includes(modality)) fail(`${at}.input names "${modality}", which is not a modality`)
+    }
+  }
+}
+
 async function main() {
   const manifest = readJson('package.json')
   const patchRelative = checkManifest(manifest)
   if (patchRelative) checkPatch(patchRelative, manifest)
 
-  const { ALIYUN_MODELS } = await import('../lib/catalog.js')
-  checkCatalog(ALIYUN_MODELS)
+  const { DISCOVERY_DEFAULTS, FALLBACK_MODELS } = await import('../lib/catalog.js')
+  checkCatalog(FALLBACK_MODELS)
+  checkDiscoveryDefaults(DISCOVERY_DEFAULTS)
 
   if (problems.length > 0) {
     console.error(`validate: ${problems.length} problem(s)`)
@@ -178,7 +201,7 @@ async function main() {
   console.log('validate: ok')
   console.log(`  package: ${manifest.name}@${manifest.version}`)
   console.log(`  patch:   ${patchRelative}`)
-  console.log(`  models:  ${ALIYUN_MODELS.length} shipped (${ALIYUN_MODELS.map((m) => m.id).join(', ')})`)
+  console.log(`  models:  ${FALLBACK_MODELS.length} fallback (${FALLBACK_MODELS.map((m) => m.id).join(', ')})`)
 }
 
 main().catch((error) => {

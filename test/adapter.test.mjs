@@ -14,17 +14,22 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { createAliyunAdapter, DEFAULT_STREAM_IDLE_TIMEOUT_MS } from '../lib/adapter.js'
-import { ALIYUN_MODELS, DEFAULT_API_KEY_ENV, DEFAULT_BASE_URL, ROUTE } from '../lib/catalog.js'
-import { apply } from '../lib/index.js'
+import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
 
-/** Build an adapter over the shipped catalog, with a stub credential. */
+import { createAliyunAdapter, DEFAULT_STREAM_IDLE_TIMEOUT_MS } from '../lib/adapter.js'
+import { DEFAULT_API_KEY_ENV, DEFAULT_BASE_URL, FALLBACK_MODELS, ROUTE } from '../lib/catalog.js'
+import { apply } from '../lib/index.js'
+import { mergeCatalog } from '../lib/models.js'
+
+const DEFAULTS = { contextWindow: 131_072, maxTokens: 32_768, input: ['text'] }
+
+/** Build an adapter over the fallback catalog, with a stub credential. */
 function makeAdapter(overrides = {}) {
   return createAliyunAdapter({
     displayName: 'Aliyun DashScope',
     apiKeyEnv: DEFAULT_API_KEY_ENV,
     baseURL: DEFAULT_BASE_URL,
-    models: ALIYUN_MODELS,
+    models: FALLBACK_MODELS,
     reasoning: undefined,
     headers: undefined,
     resolveApiKey: async () => 'test-key',
@@ -32,23 +37,24 @@ function makeAdapter(overrides = {}) {
   })
 }
 
-test('advertises exactly the shipped catalog', async () => {
-  const models = await makeAdapter().listModels(ROUTE)
+test('advertises exactly the fallback catalog before any listing arrives', async () => {
+  const { adapter } = makeAdapter()
+  const models = await adapter.listModels(ROUTE)
   assert.deepEqual(
     models.map((model) => model.id),
-    ALIYUN_MODELS.map((model) => model.id),
+    FALLBACK_MODELS.map((model) => model.id),
   )
   for (const model of models) {
     assert.equal(model.provider, ROUTE)
-    assert.equal(model.name, ALIYUN_MODELS.find((entry) => entry.id === model.id).name)
+    assert.equal(model.name, FALLBACK_MODELS.find((entry) => entry.id === model.id).name)
     assert.ok(Array.isArray(model.inputModalities) && model.inputModalities.length > 0)
   }
 })
 
 test('reports model metadata from the catalog, not from configuration', async () => {
-  const adapter = makeAdapter()
+  const { adapter } = makeAdapter()
   const info = await adapter.resolveModel(ROUTE, 'qwen3.8-max')
-  const entry = ALIYUN_MODELS.find((model) => model.id === 'qwen3.8-max')
+  const entry = FALLBACK_MODELS.find((model) => model.id === 'qwen3.8-max')
 
   assert.equal(info.id, 'qwen3.8-max')
   assert.equal(info.provider, ROUTE)
@@ -58,20 +64,76 @@ test('reports model metadata from the catalog, not from configuration', async ()
   assert.ok(info.reasoning !== undefined, 'a reasoning model must expose reasoning metadata')
 })
 
+test('a discovered catalog replaces the advertised membership', async () => {
+  const { adapter, setCatalog } = makeAdapter()
+  setCatalog(mergeCatalog({
+    ids: ['glm-5.3', 'brand-new-model'],
+    fallback: FALLBACK_MODELS,
+    defaults: DEFAULTS,
+  }))
+
+  const models = await adapter.listModels(ROUTE)
+  assert.deepEqual(models.map((model) => model.id), ['glm-5.3', 'brand-new-model'])
+
+  // A known id keeps its verified capacities; an unknown one is still usable.
+  const known = await adapter.resolveModel(ROUTE, 'glm-5.3')
+  assert.equal(known.context.contextWindow, FALLBACK_MODELS.find((entry) => entry.id === 'glm-5.3').contextWindow)
+  const discovered = await adapter.resolveModel(ROUTE, 'brand-new-model')
+  assert.equal(discovered.context.contextWindow, DEFAULTS.contextWindow)
+  assert.equal(discovered.reasoning, undefined, 'an unknown model must not claim thinking it may not have')
+
+  // Membership follows the listing, removals included.
+  await assert.rejects(() => adapter.resolveModel(ROUTE, 'qwen3.8-max'), /UNKNOWN_MODEL|no configured model/)
+})
+
+test('a model list waits for a cold listing, and adopts what arrives', async () => {
+  const ids = ['glm-5.3', 'kimi-k2.5']
+  let settled = 0
+  const { adapter, setCatalog } = makeAdapter({
+    settle: async () => {
+      settled += 1
+      setCatalog(mergeCatalog({ ids, fallback: FALLBACK_MODELS, defaults: DEFAULTS }))
+    },
+  })
+
+  const models = await adapter.listModels(ROUTE)
+
+  assert.equal(settled, 1, 'the model list is the read allowed to wait for discovery')
+  assert.deepEqual(models.map((model) => model.id), ids)
+})
+
+test('other reads only schedule a refresh, never wait for one', async () => {
+  let scheduled = 0
+  const { adapter } = makeAdapter({
+    onRead: () => {
+      scheduled += 1
+    },
+    settle: () => {
+      throw new Error('only a model list may wait for discovery')
+    },
+  })
+
+  adapter.providerInfo(ROUTE)
+  await adapter.resolveModel(ROUTE, 'qwen3.8-max')
+
+  assert.equal(scheduled, 2, 'every read is a moment a stale listing can be noticed')
+})
+
 test('names the route from configuration', async () => {
-  const adapter = makeAdapter({ displayName: 'My Aliyun' })
+  const { adapter } = makeAdapter({ displayName: 'My Aliyun' })
   assert.deepEqual(adapter.providerInfo(ROUTE), { id: ROUTE, name: 'My Aliyun' })
 })
 
 test('refuses a model the catalog does not describe', async () => {
+  const { adapter } = makeAdapter()
   await assert.rejects(
-    () => makeAdapter().resolveModel(ROUTE, 'qwen-does-not-exist'),
+    () => adapter.resolveModel(ROUTE, 'qwen-does-not-exist'),
     /UNKNOWN_MODEL|no configured model/,
   )
 })
 
 test('fails a missing credential before any network I/O', async () => {
-  const adapter = makeAdapter({
+  const { adapter } = makeAdapter({
     resolveApiKey: async () => {
       throw new Error('llm-aliyun: no credential for provider route "aliyun" (MISSING_CREDENTIAL)')
     },
@@ -93,9 +155,11 @@ test('the adapter carries an idle watchdog bound', () => {
   assert.ok(Number.isFinite(DEFAULT_STREAM_IDLE_TIMEOUT_MS) && DEFAULT_STREAM_IDLE_TIMEOUT_MS > 0)
 })
 
-test('mounting registers the route and its settings row', () => {
+test('mounting registers the route, its settings row, and its discovery', () => {
   const adapters = []
   const directory = []
+  const discoveries = []
+  const credentialListeners = []
   const ctx = {
     fiber: { entry: { options: { id: 'llm-aliyun' } } },
     llm: {
@@ -107,6 +171,13 @@ test('mounting registers the route and its settings row', () => {
         directory.push(entries)
         return { replace() {} }
       },
+      registerModelDiscovery: (settingsNs, discover) => {
+        discoveries.push({ settingsNs, discover })
+        return () => {}
+      },
+    },
+    on: (event, listener) => {
+      credentialListeners.push({ event, listener })
     },
     get: () => undefined,
     logger: { warn() {} },
@@ -116,14 +187,24 @@ test('mounting registers the route and its settings row', () => {
     displayName: 'Aliyun DashScope',
     apiKeyEnv: DEFAULT_API_KEY_ENV,
     baseURL: DEFAULT_BASE_URL,
-    models: ALIYUN_MODELS,
+    models: FALLBACK_MODELS,
     reasoning: undefined,
     headers: undefined,
+    discovery: {
+      enabled: true,
+      ttlMs: 600_000,
+      waitMs: 0,
+      timeoutMs: 15_000,
+      contextWindow: DEFAULTS.contextWindow,
+      maxTokens: DEFAULTS.maxTokens,
+      input: DEFAULTS.input,
+    },
   })
 
   assert.equal(adapters.length, 1)
   assert.deepEqual(adapters[0].routes, [ROUTE])
-  assert.equal(adapters[0].adapter.constructor.name, 'PiAiAdapter')
+  assert.ok(adapters[0].adapter instanceof PiAiAdapter, 'the registered adapter must be the real pi-ai adapter')
+  assert.equal(typeof adapters[0].adapter.listModels, 'function')
 
   assert.equal(directory.length, 1)
   const [entry] = directory[0]
@@ -131,4 +212,11 @@ test('mounting registers the route and its settings row', () => {
   assert.equal(entry.settingsNs, 'llm-aliyun')
   assert.equal(entry.declared, true)
   assert.deepEqual(entry.settingsPath, [])
+
+  // The probe a configuration surface uses is registered under this row's own
+  // namespace, and the credential event is what retries a failed listing.
+  assert.equal(discoveries.length, 1)
+  assert.equal(discoveries[0].settingsNs, 'llm-aliyun')
+  assert.equal(typeof discoveries[0].discover, 'function')
+  assert.deepEqual(credentialListeners.map((listener) => listener.event), ['credentials/reference-updated'])
 })
