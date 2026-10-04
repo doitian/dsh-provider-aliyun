@@ -264,18 +264,18 @@ npm test           # drives the real PiAiAdapter, the mount, the merge, the list
 
 ### Testing a build against the desktop app
 
+Point the desktop profile at this checkout once, as a `link:` dependency:
+
 ```bash
-npm run link:desktop   # point the desktop profile at this checkout, then verify the copy
-npm run probe          # what the picker will show, read from the live endpoint
+pnpm --dir ~/.dsh/profiles/desktop add "link:C:/Users/me/codebase/dsh-provider-aliyun"
+npm run probe   # what the picker will show, read from the live endpoint
 ```
 
-Then **restart DSH**: plugin modules are loaded once at startup, and the loader does not watch them.
+Then **restart DSH** after a change: plugin modules are loaded once at startup, and the loader does not watch them.
 
-`link:desktop` exists because a local dependency is not a live view of the worktree. pnpm hard-links a `file:` package into the profile, so an edit that *replaces* a file — `git checkout`, or any editor that saves atomically — leaves the installed copy on the previous bytes, and a plain `install`, `--force`, or `update` will not re-link it ("Already up to date", even when the directory is deleted).
+`link:` is what makes that loop work, and it is what `@doitian/dsh-music` in the same profile already uses: the entry in the profile's `node_modules` becomes a symbolic link to the worktree, so what the app reads next is the worktree itself. A `file:` dependency is the opposite — a copy — and it goes stale on exactly the edits this loop is made of: an atomic editor save, or a `git checkout`, *replaces* a file rather than overwriting it, and the copy keeps the previous bytes. A plain `install`, `--force` or `update` will not re-link it ("Already up to date", even when the directory is deleted).
 
-Re-adding the dependency is what forces a fresh resolution, but on its own it is not always enough: pnpm treats a spec that already resolves as up to date, so a second run can still leave the previous bytes behind. The script verifies the result byte for byte instead of assuming it worked, and when that check fails it drops the dependency and resolves it again rather than printing a mismatch for you to work around.
-
-Two things to expect while testing this way. The Plugins page may rewrite the dependency back to a registry range — that is a normal package install, and `link:desktop` switches it back. And a *published* release is the durable alternative: the app then installs it like any other plugin, and nothing local is involved.
+The trade is that pnpm does not install a linked package's dependencies: they resolve out of this checkout's own `node_modules` instead of the profile's, which is why the pi-ai range here is pinned to the copy the harness uses. Two things to expect while testing this way. The Plugins page may rewrite the dependency to a registry range — that is a normal package install, and re-adding the `link:` spec puts it back. And a *published* release is the durable alternative: the app then installs it like any other plugin, and nothing local is involved.
 
 ## Publishing
 

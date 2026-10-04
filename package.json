@@ -57,7 +57,6 @@
     "validate": "node scripts/validate.mjs",
     "probe": "node scripts/probe.mjs",
     "generate:metadata": "node scripts/generate-metadata.mjs",
-    "link:desktop": "node scripts/link-desktop.mjs",
     "test": "node --test",
     "prepack": "npm run validate && npm run test"
   },
