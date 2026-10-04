@@ -230,3 +230,71 @@ test('mounting registers the route, its settings row, and its discovery', () => 
   assert.equal(typeof discoveries[0].discover, 'function')
   assert.deepEqual(credentialListeners.map((listener) => listener.event), ['credentials/reference-updated'])
 })
+
+test('a listing that arrives moves the catalog and tells the surfaces', async () => {
+  // A model picker caches the catalog it read and re-reads it only when the LLM
+  // seam publishes `llm/adapters-updated`, so a swap nobody announces leaves the
+  // fallback list on screen. This drives the real mount path with a stubbed
+  // endpoint and asserts both halves: the catalog moved, and it was announced.
+  const replaced = []
+  const adapters = []
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response(
+    JSON.stringify({ object: 'list', data: [{ id: 'glm-5.3' }, { id: 'kimi-k3' }, { id: 'qwen3-tts-flash' }] }),
+    { status: 200, headers: { 'content-type': 'application/json' } },
+  )
+
+  try {
+    const ctx = {
+      fiber: { entry: { options: { id: 'llm-aliyun' } } },
+      llm: {
+        registerAdapter: (routes, adapter) => {
+          adapters.push({ routes, adapter })
+          return {
+            replace: (next) => replaced.push(next),
+          }
+        },
+        registerConfigurableProviders: () => ({ replace() {} }),
+        registerModelDiscovery: () => () => {},
+      },
+      on: () => {},
+      get: (name) => (name === 'credentials' ? { resolve: async () => ({ value: 'sk-test' }) } : undefined),
+      logger: { warn() {} },
+    }
+
+    apply(ctx, {
+      displayName: 'Aliyun DashScope',
+      apiKeyEnv: DEFAULT_API_KEY_ENV,
+      baseURL: DEFAULT_BASE_URL,
+      models: FALLBACK_MODELS,
+      reasoning: undefined,
+      headers: undefined,
+      discovery: {
+        enabled: true,
+        filter: 'chat',
+        include: [...CHAT_MODEL_PATTERNS],
+        exclude: [...NON_CHAT_MODEL_PATTERNS],
+        ttlMs: 600_000,
+        waitMs: 50,
+        timeoutMs: 15_000,
+        contextWindow: DEFAULTS.contextWindow,
+        maxTokens: DEFAULTS.maxTokens,
+        input: DEFAULTS.input,
+      },
+    })
+
+    for (let turn = 0; turn < 50 && replaced.length === 0; turn += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+
+    assert.deepEqual(replaced, [[ROUTE]], 'a moved catalog must be announced to the surfaces that cache it')
+    const models = await adapters[0].adapter.listModels(ROUTE)
+    assert.deepEqual(
+      models.map((model) => model.id),
+      ['glm-5.3', 'kimi-k3'],
+      'the listing is advertised, filtered by the same rules as any other',
+    )
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
