@@ -1,0 +1,60 @@
+{
+  "name": "@doitian/dsh-provider-aliyun",
+  "version": "0.1.0",
+  "description": "Aliyun DashScope (Bailian) model provider preset for DeepSeek Harness: adds an OpenAI-compatible `aliyun` route carrying the Qwen model catalog to the llm-pi-ai adapter.",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "dsh-bundle",
+    "deepseek-harness",
+    "aliyun",
+    "aliyuncs",
+    "dashscope",
+    "bailian",
+    "qwen",
+    "llm",
+    "provider"
+  ],
+  "license": "MIT",
+  "author": "doitian",
+  "homepage": "https://github.com/doitian/dsh-provider-aliyun#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/doitian/dsh-provider-aliyun.git"
+  },
+  "bugs": {
+    "url": "https://github.com/doitian/dsh-provider-aliyun/issues"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "cordis.patch.yml"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "validate": "node scripts/validate.mjs",
+    "prepack": "node scripts/validate.mjs"
+  },
+  "devDependencies": {
+    "js-yaml": "^4.1.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.4"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
