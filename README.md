@@ -187,17 +187,20 @@ After a failed attempt the endpoint is left alone for a minute, so an unreachabl
         input: [text, image]
         reasoning: true
         thinkingLevelMap: { low: low, medium: medium, high: high }
+        compat: { supportsReasoningEffort: true }
 ```
 
 With `discovery.enabled: false` this list is the entire route.
 
 ### Thinking
 
-Aliyun turns thinking on with a boolean `enable_thinking` rather than a reasoning-effort field, which is what `compat.thinkingFormat: 'qwen'` sends, and `supportsReasoningEffort: false` keeps an effort value off the wire where this endpoint would refuse it. The selected level still drives the boolean, so `off` genuinely turns thinking off.
+Aliyun turns thinking on with a boolean `enable_thinking`, which is what `compat.thinkingFormat: 'qwen'` sends, and a model that takes one accepts a `reasoning_effort` beside it. The route default is `supportsReasoningEffort: false`, because discovery advertises whatever a workspace lists and this endpoint answers an effort it does not recognize with a 400 — so by default the selected level drives the boolean, and `off` genuinely turns thinking off.
 
-`thinkingLevelMap` on each catalog entry declares which levels a model offers and the wire spelling of each. A level left out is not offered; `off` is offered unless it is named in the map.
+`thinkingLevelMap` on each catalog entry declares which levels a model offers and the wire spelling of each. A base level (`off` through `high`) is offered unless it is mapped to `null`; `xhigh` and `max` are offered only when named. `null` is therefore how a model refuses a level — and for a base level it is the *only* way, since leaving one out still offers it.
 
-A discovered model the fallback does not name is declared non-reasoning: a level map is a claim about a model, and claiming thinking it may not have would offer levels the endpoint can refuse. Name the model in `models` to give it levels.
+`compat` on an entry overrides the route's switches for that model alone. The three shipped entries use it, because their endpoint behaviour has been checked rather than assumed: `supportsReasoningEffort: true` puts the level on the wire, and each map states the vocabulary that endpoint validates. Qwen3.8 Max and DeepSeek V4.1 Flash take every level through `max` (DeepSeek also takes `ultra`, for which pi-ai has no level name), while GLM-5.3 takes only `low`/`high`/`max` and refuses even `enable_thinking: false` — so its other levels are mapped to `null` instead of being left in a selector that would 400.
+
+A discovered model the fallback does not name keeps the route switches and the conservative level set (`low`/`medium`/`high`), and one with no facts at all is declared non-reasoning: a level map is a claim about a model, and claiming thinking it may not have would offer levels the endpoint can refuse. Name the model in `models` to give it levels.
 
 ## Uninstall
 

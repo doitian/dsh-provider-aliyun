@@ -8,8 +8,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { CHAT_MODEL_PATTERNS, NON_CHAT_MODEL_PATTERNS } from '../lib/catalog.js'
-import { compilePatterns, selectIds } from '../lib/models.js'
+import { CHAT_MODEL_PATTERNS, FALLBACK_MODELS, NON_CHAT_MODEL_PATTERNS, ROUTE } from '../lib/catalog.js'
+import { compilePatterns, materializeModels, mergeCatalog, selectIds } from '../lib/models.js'
 
 const LISTING = [
   'qwen3.8-max',
@@ -106,4 +106,63 @@ test('an exclusion still beats the snapshot', () => {
     known: () => true,
   })
   assert.deepEqual(ids, ['glm-5.3'])
+})
+
+test('a model entry overrides the route switches for itself alone', () => {
+  const route = { thinkingFormat: 'qwen', supportsReasoningEffort: false }
+  const models = materializeModels({
+    catalog: [
+      { id: 'effort-model', name: 'Effort', contextWindow: 1, maxTokens: 1, input: ['text'], reasoning: true, compat: { supportsReasoningEffort: true } },
+      { id: 'boolean-model', name: 'Boolean', contextWindow: 1, maxTokens: 1, input: ['text'], reasoning: true },
+    ],
+    provider: ROUTE,
+    baseUrl: 'https://example.test/compatible-mode/v1',
+    compat: route,
+  })
+
+  // The override wins for its own model and leaves the rest of the route's
+  // switches intact; the model that names none keeps the route's exactly.
+  assert.deepEqual(models[0].compat, { thinkingFormat: 'qwen', supportsReasoningEffort: true })
+  assert.deepEqual(models[1].compat, route)
+})
+
+test('a discovered model keeps the route switches and the conservative levels', () => {
+  const merged = mergeCatalog({
+    ids: ['brand-new-model'],
+    fallback: FALLBACK_MODELS,
+    defaults: { contextWindow: 131_072, maxTokens: 32_768, input: ['text'] },
+    metadata: {
+      facts: () => ({ name: 'Brand New', contextWindow: 262_144, maxTokens: 65_536, input: ['text'], reasoning: true }),
+    },
+  })
+  const route = { thinkingFormat: 'qwen', supportsReasoningEffort: false }
+  const [model] = materializeModels({ catalog: merged, provider: ROUTE, baseUrl: 'x', compat: route })
+
+  // Discovery states a model thinks, not how its endpoint spells an effort, so
+  // an id nothing names keeps the boolean and the default level set.
+  assert.deepEqual(model.compat, route)
+  assert.deepEqual(model.thinkingLevelMap, { low: 'low', medium: 'medium', high: 'high' })
+})
+
+test('the shipped entries state what their endpoint accepts and withholds', () => {
+  const byId = new Map(FALLBACK_MODELS.map((entry) => [entry.id, entry]))
+
+  // Each verified model puts its level on the wire, and names the top levels
+  // that pi-ai offers only when named.
+  for (const id of ['qwen3.8-max', 'deepseek-v4.1-flash', 'glm-5.3']) {
+    const entry = byId.get(id)
+    assert.equal(entry.compat?.supportsReasoningEffort, true, `${id} must send its level as an effort`)
+    assert.equal(entry.thinkingLevelMap.max, 'max', `${id} must name the max level its endpoint takes`)
+  }
+
+  // GLM-5.3 takes only low/high/max, so every other level is withheld rather
+  // than left to pi-ai's "offer it unless nulled" default.
+  const glm = byId.get('glm-5.3').thinkingLevelMap
+  for (const level of ['off', 'minimal', 'medium', 'xhigh']) {
+    assert.equal(glm[level], null, `glm-5.3 must withhold ${level}`)
+  }
+  assert.deepEqual(
+    Object.entries(glm).filter(([, wire]) => typeof wire === 'string').map(([level]) => level),
+    ['low', 'high', 'max'],
+  )
 })

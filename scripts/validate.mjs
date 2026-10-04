@@ -282,16 +282,37 @@ function checkCatalog(catalog) {
           fail(`${at}: "${id}" thinkingLevelMap."${level}" is not a thinking level`)
           continue
         }
-        if (wire === null) {
-          if (level !== 'off') fail(`${at}: "${id}" thinkingLevelMap.${level} needs a wire value; only "off" may be null`)
-        } else if (typeof wire !== 'string' || wire.length === 0) {
-          fail(`${at}: "${id}" thinkingLevelMap.${level} must be a non-empty string`)
+        // `null` withholds a level, and it is the only way to withhold a base
+        // one: pi-ai offers off/minimal/low/medium/high unless a map nulls them,
+        // and offers xhigh/max only when one names them. A model whose endpoint
+        // refuses a level says so here — GLM-5.3 takes only low/high/max.
+        if (wire === null) continue
+        if (typeof wire !== 'string' || wire.length === 0) {
+          fail(`${at}: "${id}" thinkingLevelMap.${level} must be a non-empty string or null`)
         } else if (level !== 'off') {
           offered++
         }
       }
       if (offered === 0) {
         fail(`${at}: "${id}" thinkingLevelMap offers no level beyond "off"`)
+      }
+      // Naming a level above `high` claims the endpoint has one. Without the
+      // switch that puts an effort on the wire, pi-ai only turns the boolean on,
+      // so the claim would be a label that changes nothing.
+      const beyondHigh = ['xhigh', 'max'].some((level) => entry.thinkingLevelMap[level] !== null && entry.thinkingLevelMap[level] !== undefined)
+      if (beyondHigh && entry.compat?.supportsReasoningEffort !== true) {
+        fail(`${at}: "${id}" names an xhigh/max level but does not set compat.supportsReasoningEffort, so the level would never reach the endpoint`)
+      }
+    }
+    if (entry.compat !== undefined) {
+      if (!isPlainObject(entry.compat)) {
+        fail(`${at}: "${id}" compat must be an object of wire switches`)
+      } else {
+        for (const [name, value] of Object.entries(entry.compat)) {
+          if (typeof value !== 'boolean' && typeof value !== 'string' && typeof value !== 'number') {
+            fail(`${at}: "${id}" compat.${name} must be a boolean, string, or number`)
+          }
+        }
       }
     }
   }
