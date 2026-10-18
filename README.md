@@ -27,10 +27,12 @@ The trade-off is honest: the plugin depends on internal shapes of the adapter an
 
 ## Requirements
 
-- DeepSeek Harness `0.2.0-rc.2` with the `@deepseek-ai/dsh-base` bundle, which mounts the LLM seam this plugin registers on.
+- DeepSeek Harness `0.2.1-rc.2` with the `@deepseek-ai/dsh-base` bundle, which mounts the LLM seam this plugin registers on.
 - An Aliyun DashScope / Bailian API key.
 - **An endpoint that answers `GET {baseURL}/models`.** The workspace hosts and the public compatible-mode endpoints do; a deployment that does not still works — the route just advertises the fallback catalog, and you can hand-list models with `models` in configuration instead.
 - **No `aliyun` route configured through `llm-pi-ai`.** Two adapters cannot declare the same route: mounting this plugin while a profile still configures one fails with `configurable provider "aliyun" is already declared`. Remove that block from your profile patch first — that is the whole point of the plugin.
+
+> **That DSH version is a pin, not a floor.** The harness refuses to load a plugin whose `@deepseek-ai/dsh-*` peer requirements the running DSH version does not satisfy — `evaluatePluginCompatibility` in `dsh-app-boot` reads them, and a miss is reported as *"is incompatible with DSH …, running it may cause crashes or data loss"*. Prereleases participate in those ranges, so each DSH release candidate marks the previous release of this package incompatible until it re-declares the new one; that is a patch release here, not a rewrite. If you are already on a newer DSH than the pin above, the plugin manager can load the installed version anyway with an **exact-version exemption** for `@doitian/dsh-provider-aliyun@<version>` on that DSH version — which accepts the risk that an internal shape moved. Upgrading the package is the honest fix; `npm test` is what makes the claim, since it drives the real `PiAiAdapter` from the installed `@deepseek-ai/dsh-llm-pi-ai`.
 
 ## Install
 
@@ -246,7 +248,7 @@ The adapter is `PiAiAdapter`, exported by `@deepseek-ai/dsh-llm-pi-ai`. It owns 
 
 A third seam is entirely on the client: `lib/client.js` reaches the page through the keyed `settings.models.provider-card` slot and the `configForms` service, neither of which this package owns. Two signs that one moved: the card is absent with `slot entry crashed in 'settings.models.provider-card'` in the browser console, or `ctx.configForms.get()` returns a scope whose writes the host refuses. `test/client.test.mjs` drives the bundle through a stub module system and asserts the registration, the controls, and the two-write save, which is as far as a check can go without a page.
 
-The engine is pinned to the harness's own pi-ai: the dependency is `^0.87.1`, which resolves to exactly the `0.87.1` the harness installs, so both share one copy.
+The engine is pinned to the harness's own pi-ai: the dependency is `^1.1.0`, which resolves to exactly the `1.1.0` the harness installs, so both share one copy.
 
 ## Development
 

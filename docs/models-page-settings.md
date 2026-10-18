@@ -17,7 +17,7 @@ getting the endpoint, the API key, and the model overrides into that tab.
 > configuration therefore had to become a function of it, which is what
 > `sync()` in `lib/index.js` and `facts()` in `lib/adapter.js` exist for.
 
-Everything below was read out of the installed harness (`0.2.0-rc.2`, Desktop
+Everything below was read out of the installed harness (`0.2.1-rc.2`, Desktop
 `app.asar`) rather than a source checkout. File references are to the extracted
 package sources; the decisive lines are quoted.
 
