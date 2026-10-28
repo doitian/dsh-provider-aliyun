@@ -40,11 +40,12 @@ Each release declares the harness it was built and tested against, and that decl
 
 | Plugin release | DeepSeek Harness | `dsh-llm`, `dsh-llm-pi-ai` |
 |---|---|---|
+| `0.5.0` | `0.2.1-rc.3` | `0.2.1-rc.3` |
 | `0.4.2` | `0.2.1-rc.3` | `0.2.1-rc.3` |
 | `0.4.1` | `0.2.1-rc.2` | `0.2.1-rc.2` |
 | `0.1.0` – `0.4.0` | `0.2.0-rc.2` | `0.2.0-rc.2` |
 
-The `0.4.1` → `0.4.2` step is only a re-declaration: the `lib/index.js` of both peer packages is byte-identical between `0.2.1-rc.2` and `0.2.1-rc.3`, so the plugin's own behaviour did not move with it.
+The `0.4.1` → `0.4.2` step is only a re-declaration: the `lib/index.js` of both peer packages is byte-identical between `0.2.1-rc.2` and `0.2.1-rc.3`, so the plugin's own behaviour did not move with it. `0.5.0` adds a model to the shipped catalog and keeps that same pin, so it needs no exemption on `0.2.1-rc.3`.
 
 ## Install
 
