@@ -27,12 +27,24 @@ The trade-off is honest: the plugin depends on internal shapes of the adapter an
 
 ## Requirements
 
-- DeepSeek Harness `0.2.1-rc.3` with the `@deepseek-ai/dsh-base` bundle, which mounts the LLM seam this plugin registers on.
+- **DeepSeek Harness `0.2.1-rc.3`** with the `@deepseek-ai/dsh-base` bundle, which mounts the LLM seam this plugin registers on. The [compatibility table](#compatibility) maps every release to the DSH it pins.
 - An Aliyun DashScope / Bailian API key.
 - **An endpoint that answers `GET {baseURL}/models`.** The workspace hosts and the public compatible-mode endpoints do; a deployment that does not still works — the route just advertises the fallback catalog, and you can hand-list models with `models` in configuration instead.
 - **No `aliyun` route configured through `llm-pi-ai`.** Two adapters cannot declare the same route: mounting this plugin while a profile still configures one fails with `configurable provider "aliyun" is already declared`. Remove that block from your profile patch first — that is the whole point of the plugin.
 
-> **That DSH version is a pin, not a floor.** The harness refuses to load a plugin whose `@deepseek-ai/dsh-*` peer requirements the running DSH version does not satisfy — `evaluatePluginCompatibility` in `dsh-app-boot` reads them, and a miss is reported as *"is incompatible with DSH …, running it may cause crashes or data loss"*. Prereleases participate in those ranges, so each DSH release candidate marks the previous release of this package incompatible until it re-declares the new one; that is a patch release here, not a rewrite. If you are already on a newer DSH than the pin above, the plugin manager can load the installed version anyway with an **exact-version exemption** for `@doitian/dsh-provider-aliyun@<version>` on that DSH version — which accepts the risk that an internal shape moved. Upgrading the package is the honest fix; `npm test` is what makes the claim, since it drives the real `PiAiAdapter` from the installed `@deepseek-ai/dsh-llm-pi-ai`.
+> **That DSH version is a pin, not a floor.** The harness refuses to load a plugin whose `@deepseek-ai/dsh-*` peer requirements the running DSH version does not satisfy — `evaluatePluginCompatibility` in `dsh-app-boot` reads them, and a miss is reported as *"is incompatible with DSH …, running it may cause crashes or data loss"*. Prereleases participate in those ranges, so each DSH release candidate marks the previous release of this package incompatible until it re-declares the new one; that is a patch release here, not a rewrite. If you are already on a newer DSH than the installed release, the plugin manager can load it anyway with an **exact-version exemption** for `@doitian/dsh-provider-aliyun@<version>` on that DSH version — which accepts the risk that an internal shape moved. Upgrading the package is the honest fix; `npm test` is what makes the claim, since it drives the real `PiAiAdapter` from the installed `@deepseek-ai/dsh-llm-pi-ai`.
+
+## Compatibility
+
+Each release declares the harness it was built and tested against, and that declaration is what the DSH plugin manager checks before loading it. Pick the row for the DSH you run:
+
+| Plugin release | DeepSeek Harness | `dsh-llm`, `dsh-llm-pi-ai` |
+|---|---|---|
+| `0.4.2` | `0.2.1-rc.3` | `0.2.1-rc.3` |
+| `0.4.1` | `0.2.1-rc.2` | `0.2.1-rc.2` |
+| `0.1.0` – `0.4.0` | `0.2.0-rc.2` | `0.2.0-rc.2` |
+
+The `0.4.1` → `0.4.2` step is only a re-declaration: the `lib/index.js` of both peer packages is byte-identical between `0.2.1-rc.2` and `0.2.1-rc.3`, so the plugin's own behaviour did not move with it.
 
 ## Install
 
