@@ -27,7 +27,7 @@ The trade-off is honest: the plugin depends on internal shapes of the adapter an
 
 ## Requirements
 
-- DeepSeek Harness `0.2.1-rc.2` with the `@deepseek-ai/dsh-base` bundle, which mounts the LLM seam this plugin registers on.
+- DeepSeek Harness `0.2.1-rc.3` with the `@deepseek-ai/dsh-base` bundle, which mounts the LLM seam this plugin registers on.
 - An Aliyun DashScope / Bailian API key.
 - **An endpoint that answers `GET {baseURL}/models`.** The workspace hosts and the public compatible-mode endpoints do; a deployment that does not still works — the route just advertises the fallback catalog, and you can hand-list models with `models` in configuration instead.
 - **No `aliyun` route configured through `llm-pi-ai`.** Two adapters cannot declare the same route: mounting this plugin while a profile still configures one fails with `configurable provider "aliyun" is already declared`. Remove that block from your profile patch first — that is the whole point of the plugin.
