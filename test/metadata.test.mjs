@@ -37,12 +37,32 @@ test('every entry states facts the adapter can dispatch', () => {
 test('the snapshot agrees with the shipped catalog on the models it names', () => {
   for (const entry of FALLBACK_MODELS) {
     const facts = metadata.models[entry.id]
-    assert.ok(facts !== undefined, `${entry.id} is shipped but missing from the snapshot`)
+    // A shipped model the registry has not published is expected: Aliyun serves
+    // a build before models.dev lists it, and the catalog entry is that model's
+    // authority — `mergeCatalog` uses it as written, so no fact is missing.
+    if (facts === undefined) continue
     // Two independent sources agreeing is the point of shipping both; a
     // divergence after a regeneration is a human decision, not a silent update.
     assert.equal(facts.contextWindow, entry.contextWindow, `${entry.id}: contextWindow`)
     assert.equal(facts.maxTokens, entry.maxTokens, `${entry.id}: maxTokens`)
   }
+})
+
+test('a shipped model the registry does not publish keeps its catalog facts', () => {
+  const unpublished = FALLBACK_MODELS.filter((entry) => metadata.models[entry.id] === undefined)
+  const entry = unpublished[0]
+  assert.ok(entry !== undefined, 'this test needs a shipped model the snapshot does not name')
+
+  const merged = mergeCatalog({
+    ids: [entry.id],
+    fallback: FALLBACK_MODELS,
+    defaults: DEFAULTS,
+    metadata: createMetadataIndex(metadata),
+  })
+
+  // The written entry, not the conservative defaults a silent id would get.
+  assert.equal(merged[0], entry)
+  assert.notEqual(merged[0].contextWindow, DEFAULTS.contextWindow)
 })
 
 test('lookup bridges the spellings the two sides use', () => {

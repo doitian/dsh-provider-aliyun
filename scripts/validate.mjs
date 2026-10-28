@@ -430,9 +430,22 @@ async function main() {
   checkPatterns(CHAT_MODEL_PATTERNS, NON_CHAT_MODEL_PATTERNS, FALLBACK_MODELS)
   const metadata = readJson('lib/metadata.json')
   checkMetadata(metadata)
+  // The snapshot is a registry view and the catalog is this package's own
+  // statement, so the two are only comparable where both name an id. A shipped
+  // model the registry has not published (Aliyun serves a build before models.dev
+  // lists it) is not a defect: `mergeCatalog` uses a catalog entry as written, so
+  // its facts never come from the snapshot at all. What the snapshot *does* name
+  // must agree, because a regeneration that changed units or picked the wrong
+  // model is what this check exists to catch.
+  const unpublished = FALLBACK_MODELS.filter((entry) => metadata.models?.[entry.id] === undefined)
   for (const entry of FALLBACK_MODELS) {
-    if (!(entry.id in (metadata.models ?? {}))) {
-      fail(`lib/metadata.json: shipped model "${entry.id}" is missing, so its facts would come from the fallback catalog alone`)
+    const facts = metadata.models?.[entry.id]
+    if (facts === undefined) continue
+    if (facts.contextWindow !== entry.contextWindow) {
+      fail(`lib/metadata.json: shipped model "${entry.id}" states contextWindow ${facts.contextWindow}, but lib/catalog.js ships ${entry.contextWindow}`)
+    }
+    if (facts.maxTokens !== entry.maxTokens) {
+      fail(`lib/metadata.json: shipped model "${entry.id}" states maxTokens ${facts.maxTokens}, but lib/catalog.js ships ${entry.maxTokens}`)
     }
   }
 
@@ -448,6 +461,11 @@ async function main() {
   console.log(`  models:  ${FALLBACK_MODELS.length} fallback (${FALLBACK_MODELS.map((m) => m.id).join(', ')})`)
   console.log(`  filter:  ${CHAT_MODEL_PATTERNS.length} include / ${NON_CHAT_MODEL_PATTERNS.length} exclude patterns`)
   console.log(`  facts:   ${Object.keys(metadata.models).length} from ${metadata.providers.join(' + ')} (${metadata.generatedAt.slice(0, 10)})`)
+  // Worth naming: these are advertised with facts the registry does not confirm,
+  // so nobody should read the line above as covering them.
+  if (unpublished.length > 0) {
+    console.log(`  lagging: ${unpublished.map((entry) => entry.id).join(', ')} not in the snapshot; lib/catalog.js is their only source`)
+  }
 }
 
 main().catch((error) => {

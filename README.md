@@ -136,7 +136,7 @@ Three things a listing does not do, and what happens instead:
 | Failure | A failed read changes nothing: the last good listing stays in effect, and before the first one the fallback catalog does. A listing that names nothing counts as a failure — `{"data":[]}` says nothing about what an endpoint serves. |
 | Latency | Only a model-list read waits for the endpoint, and only for `discovery.waitMs`. Every other read merely schedules a refresh, so a picker opened during a slow fetch shows what is already known. |
 
-The shipped fallback list is three models: `qwen3.8-max`, `deepseek-v4.1-flash`, `glm-5.3`. It is *also* the metadata table, which is the whole trick — anything worth naming here gets your numbers.
+The shipped fallback list is four models: `qwen3.8-max`, `deepseek-v4.1-flash`, `deepseek-v4.1-flash-1017`, `glm-5.3`. It is *also* the metadata table, which is the whole trick — anything worth naming here gets your numbers. The dated DeepSeek build is there because Aliyun publishes it beside the rolling alias while models.dev does not list it: naming it is what gives a snapshot the same 1M/384K capacities as its parent instead of the conservative defaults.
 
 **A listing is a catalogue, not a chat menu.** A workspace endpoint answers with everything the account can reach — on the workspace this plugin was developed against, 262 entries covering speech synthesis, speech recognition, image generation, embeddings, rerankers, realtime duplex models, and every legacy generation back to `qwen-7b-chat`. The listing discloses `id`, `object`, `created`, and `owned_by`, so *what an id is* cannot be read from the listing at all. Two things decide it instead, and the default uses both: name patterns from configuration, and the shipped metadata snapshot, which states outright whether a model reads and answers text. On that endpoint the three modes come out as:
 
@@ -155,6 +155,8 @@ npm run generate:metadata   # refresh lib/metadata.json from models.dev
 ```
 
 Precedence is fixed, most authoritative first: an entry in `models` is used exactly as written, then the snapshot, then the conservative defaults below. Membership stays the endpoint's business — the snapshot only admits a model the endpoint actually listed, and a model newer than the snapshot is still advertised when a pattern matches it, just with default numbers. Regenerating is a normal code change: `npm test` fails if the snapshot and the shipped catalog disagree about a model they both name.
+
+The snapshot is one registry's view and it lags what a workspace serves, so the two need not cover the same ids. `npm run generate:metadata` cannot add a model models.dev has not published — `deepseek-v4.1-flash-1017` is served today and absent from it — and a shipped entry is that model's only authority anyway, because `models` outranks the snapshot. `npm run validate` reports such ids on a `lagging:` line rather than failing, and still fails when a model both sides name disagrees.
 
 **Verify capacities against your endpoint when you upgrade.** A wrong `contextWindow` is the failure that hurts.
 
@@ -212,7 +214,7 @@ Aliyun turns thinking on with a boolean `enable_thinking`, which is what `compat
 
 `thinkingLevelMap` on each catalog entry declares which levels a model offers and the wire spelling of each. A base level (`off` through `high`) is offered unless it is mapped to `null`; `xhigh` and `max` are offered only when named. `null` is therefore how a model refuses a level — and for a base level it is the *only* way, since leaving one out still offers it.
 
-`compat` on an entry overrides the route's switches for that model alone. The three shipped entries use it, because their endpoint behaviour has been checked rather than assumed: `supportsReasoningEffort: true` puts the level on the wire, and each map states the vocabulary that endpoint validates. Qwen3.8 Max and DeepSeek V4.1 Flash take every level through `max` (DeepSeek also takes `ultra`, for which pi-ai has no level name), while GLM-5.3 takes only `low`/`high`/`max` and refuses even `enable_thinking: false` — so its other levels are mapped to `null` instead of being left in a selector that would 400.
+`compat` on an entry overrides the route's switches for that model alone. The four shipped entries use it, because their endpoint behaviour has been checked rather than assumed: `supportsReasoningEffort: true` puts the level on the wire, and each map states the vocabulary that endpoint validates. Qwen3.8 Max and both DeepSeek V4.1 Flash builds take every level through `max` (DeepSeek also takes `ultra`, for which pi-ai has no level name), while GLM-5.3 takes only `low`/`high`/`max` and refuses even `enable_thinking: false` — so its other levels are mapped to `null` instead of being left in a selector that would 400.
 
 A discovered model the fallback does not name keeps the route switches and the conservative level set (`low`/`medium`/`high`), and one with no facts at all is declared non-reasoning: a level map is a claim about a model, and claiming thinking it may not have would offer levels the endpoint can refuse. Name the model in `models` to give it levels.
 

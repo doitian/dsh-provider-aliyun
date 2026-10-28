@@ -17,10 +17,12 @@ const LISTING = [
   'qwen3.7-text-embedding',
   'glm-5.3',
   'deepseek-v4.1-flash',
+  'deepseek-v4.1-flash-1017',
   'kimi-k3',
   'qwen-image-3.0',
   'test-sre-gpu-auto-handle',
   'ZHIPU/GLM-5.3',
+  'vanchin/deepseek-v4.1-flash-1017',
   'qwen3.7-flash-2026-07-15',
   'qwen3-omni-flash-realtime',
 ]
@@ -30,7 +32,9 @@ const defaults = {
   mode: 'chat',
   include: compilePatterns([...CHAT_MODEL_PATTERNS]),
   exclude: compilePatterns([...NON_CHAT_MODEL_PATTERNS]),
-  pinned: ['qwen3.8-max', 'deepseek-v4.1-flash', 'glm-5.3'],
+  // `pinned` is `models`, whose default is the shipped catalog: the plugin
+  // spells this exactly as the entry ids.
+  pinned: FALLBACK_MODELS.map((entry) => entry.id),
 }
 
 test('the default filter keeps chat models and drops the rest of a workspace catalogue', () => {
@@ -38,8 +42,20 @@ test('the default filter keeps chat models and drops the rest of a workspace cat
     'qwen3.8-max',
     'glm-5.3',
     'deepseek-v4.1-flash',
+    'deepseek-v4.1-flash-1017',
     'kimi-k3',
   ])
+})
+
+test('a dated build is part of its family, so the patterns admit it without a pin', () => {
+  const ids = selectIds(['deepseek-v4.1-flash-1017', 'vanchin/deepseek-v4.1-flash-1017'], {
+    mode: 'chat',
+    include: compilePatterns([...CHAT_MODEL_PATTERNS]),
+    exclude: compilePatterns([...NON_CHAT_MODEL_PATTERNS]),
+  })
+  // The canonical id matches; the vendor-prefixed alias of the same model does
+  // not, which is how the picker avoids advertising one model twice.
+  assert.deepEqual(ids, ['deepseek-v4.1-flash-1017'])
 })
 
 test('a pinned id survives every pattern, including an exclusion', () => {
@@ -149,7 +165,7 @@ test('the shipped entries state what their endpoint accepts and withholds', () =
 
   // Each verified model puts its level on the wire, and names the top levels
   // that pi-ai offers only when named.
-  for (const id of ['qwen3.8-max', 'deepseek-v4.1-flash', 'glm-5.3']) {
+  for (const id of ['qwen3.8-max', 'deepseek-v4.1-flash', 'deepseek-v4.1-flash-1017', 'glm-5.3']) {
     const entry = byId.get(id)
     assert.equal(entry.compat?.supportsReasoningEffort, true, `${id} must send its level as an effort`)
     assert.equal(entry.thinkingLevelMap.max, 'max', `${id} must name the max level its endpoint takes`)
